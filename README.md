@@ -43,7 +43,7 @@ Today the simulator runs in the browser; Phase 2 moves it behind Kafka and adds 
 
 ## Tech stack
 
-**Frontend:** Angular 19 (standalone components, signals), TypeScript, RxJS, `@angular/google-maps`, Three.js, GLSL shaders.
+**Frontend:** Angular 19 (standalone components, signals), TypeScript, RxJS, Leaflet + OpenStreetMap/CartoDB tiles (no API key), Three.js, GLSL shaders.
 
 ## The interesting bits
 

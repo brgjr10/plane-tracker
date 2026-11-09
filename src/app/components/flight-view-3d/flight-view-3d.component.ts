@@ -288,11 +288,6 @@ export class FlightView3dComponent implements AfterViewInit, OnDestroy {
     this.router.navigate(['/']);
   }
 
-  /** Jump to the Google vector 3D prototype for the same flight (comparison). */
-  goToMap3d(): void {
-    this.router.navigate(['/map3d-view', this.flightId]);
-  }
-
   private initScene(): void {
     const canvas = this.canvasRef().nativeElement;
     const width = this.host.clientWidth || window.innerWidth;

@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Dict, Optional
 
@@ -13,7 +14,11 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger("planetracker")
 
 OPENSKY_URL = "https://opensky-network.org/api/states/all"
-POLL_INTERVAL_SEC = 5.0
+BASE_POLL_INTERVAL_SEC = 10.0
+MAX_POLL_INTERVAL_SEC = 120.0
+
+OPENSKY_USERNAME = os.getenv("OPENSKY_USERNAME", "")
+OPENSKY_PASSWORD = os.getenv("OPENSKY_PASSWORD", "")
 
 app = FastAPI(title="Plane Tracker Live Feed")
 
@@ -64,12 +69,20 @@ def opensky_to_aircraft(state: list) -> Optional[dict]:
 
 
 async def poll_opensky():
-    """Background task: poll OpenSky every POLL_INTERVAL_SEC and broadcast."""
+    """Background task: poll OpenSky and broadcast to WebSocket clients.
+
+    Uses optional OpenSky auth (OPENSKY_USERNAME / OPENSKY_PASSWORD env vars)
+    when available — unauthenticated requests are heavily rate limited (429).
+    On any failure the poller backs off exponentially up to MAX_POLL_INTERVAL_SEC
+    and resets to BASE_POLL_INTERVAL_SEC on success.
+    """
     log.info("OpenSky poller started")
+    backoff = BASE_POLL_INTERVAL_SEC
+    auth = (OPENSKY_USERNAME, OPENSKY_PASSWORD) if OPENSKY_USERNAME else None
     async with httpx.AsyncClient(timeout=15.0) as client:
         while True:
             try:
-                resp = await client.get(OPENSKY_URL)
+                resp = await client.get(OPENSKY_URL, auth=auth)
                 resp.raise_for_status()
                 data = resp.json()
                 states = data.get("states", []) or []
@@ -95,10 +108,12 @@ async def poll_opensky():
                         dead.append(ws)
                 for ws in dead:
                     clients.discard(ws)
+                backoff = BASE_POLL_INTERVAL_SEC
                 log.info("Polled OpenSky: %d aircraft, %d clients", len(fleet), len(clients))
             except Exception as exc:
                 log.exception("OpenSky poll failed: %s", exc)
-            await asyncio.sleep(POLL_INTERVAL_SEC)
+                backoff = min(backoff * 2, MAX_POLL_INTERVAL_SEC)
+            await asyncio.sleep(backoff)
 
 
 @app.on_event("startup")

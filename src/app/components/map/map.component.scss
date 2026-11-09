@@ -5,6 +5,7 @@
   min-height: 400px;
 
   &__canvas {
+    /* Leaflet adds `leaflet-container` to this div; it must fill the map. */
     display: block;
     width: 100%;
     height: 100%;

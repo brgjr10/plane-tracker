@@ -9,11 +9,14 @@ import {
   OnDestroy,
   OnInit,
   signal,
+  viewChild,
+  ElementRef,
+  AfterViewInit,
 } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { Router } from '@angular/router';
-import { GoogleMap } from '@angular/google-maps';
 import { interval } from 'rxjs';
+import * as L from 'leaflet';
 import {
   AircraftInfoPanelComponent,
   FlightPanelInfo,
@@ -22,7 +25,6 @@ import {
 import { Aircraft } from '../../models/aircraft.model';
 import { AIRPORTS, cityForAirport, SEED_FLIGHTS } from '../../data/seed-data';
 import { LiveFlightService } from '../../services/live-flight.service';
-import { GoogleMapsLoaderService } from '../../services/google-maps-loader.service';
 import { MapThemeService } from '../../services/map-theme.service';
 import {
   AircraftCardInfo,
@@ -30,7 +32,7 @@ import {
   AircraftMarker,
   createAircraftMarker,
 } from './aircraft-marker.overlay';
-import { LABEL_ZOOM_THRESHOLD, mapStyleFor } from './map-styles';
+import { tileLayerFor, LABEL_ZOOM_THRESHOLD } from './map-styles';
 
 /**
  * Aircraft marker diameter (px) scales with altitude — bigger when higher (a
@@ -74,36 +76,38 @@ function markerSizeForAltitude(altitudeFt: number): number {
 }
 
 /**
- * Displays the Google Map that aircraft will eventually be plotted on.
+ * Displays the Leaflet map that aircraft will eventually be plotted on.
  *
- * The map is rendered only after the Google Maps JS API has loaded (via
- * GoogleMapsLoaderService). While loading we show a status message, and on
- * failure we show the error instead of a blank container — so a missing API
- * key or network problem is obvious rather than silent.
+ * The map is rendered in ngAfterViewInit once the container div exists. While
+ * loading we show a status message; Leaflet loads synchronously via its CSS/JS
+ * (included in index.html) so there's no async API key step — the map just works.
  */
 @Component({
   selector: 'app-map',
   standalone: true,
-  imports: [GoogleMap, AircraftInfoPanelComponent],
+  imports: [AircraftInfoPanelComponent],
   templateUrl: './map.component.html',
   styleUrl: './map.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class MapComponent implements OnInit, OnDestroy {
-  private readonly mapsLoader = inject(GoogleMapsLoaderService);
+export class MapComponent
+  implements OnInit, OnDestroy, AfterViewInit
+{
   private readonly cdr = inject(ChangeDetectorRef);
   private readonly mapTheme = inject(MapThemeService);
   private readonly liveFlights = inject(LiveFlightService);
   private readonly zone = inject(NgZone);
   private readonly router = inject(Router);
 
-  /** The underlying map instance, captured once it initializes. */
-  private map?: google.maps.Map;
+  private readonly mapContainer =
+    viewChild.required<ElementRef<HTMLElement>>('mapContainer');
+
+  /** The underlying Leaflet map instance, created in ngAfterViewInit. */
+  private map?: L.Map;
 
   /**
-   * Aircraft markers keyed by flightId. These are custom OverlayView instances
-   * (rotatable), managed imperatively — not via the template — so they can't be
-   * declarative <map-marker>s.
+   * Aircraft markers keyed by flightId. These are custom L.Layer instances
+   * (rotatable), managed imperatively — not via the template.
    */
   private readonly markers = new Map<string, AircraftMarker>();
 
@@ -128,10 +132,10 @@ export class MapComponent implements OnInit, OnDestroy {
    * follow turns on so the first frame centres immediately.
    */
   private lastFollowPanMs = 0;
-  private solidLine?: google.maps.Polyline;
-  private dashedLine?: google.maps.Polyline;
-  private originMarker?: google.maps.Marker;
-  private destMarker?: google.maps.Marker;
+  private solidLine?: L.Polyline;
+  private dashedLine?: L.Polyline;
+  private originMarker?: L.Marker;
+  private destMarker?: L.Marker;
 
   /** flightId of the currently selected aircraft (drives the info panel). */
   private readonly selectedFlightId = signal<string | null>(null);
@@ -179,127 +183,110 @@ export class MapComponent implements OnInit, OnDestroy {
     return active;
   });
 
-  /** True once the Maps JS API has loaded and <google-map> can render. */
+  /** True once the map has been initialised. Leaflet loads synchronously. */
   mapReady = false;
-  /** Populated if the API fails to load; shown to the user. */
+  /** Populated if the map fails to initialise; shown to the user. */
   loadError: string | null = null;
 
+  /**
+   * Bounds of the whole world map. ~85.05° is the latitude edge of the Web
+   * Mercator projection; full longitude (-180..180) is the whole east/west span.
+   * Reused for both the initial auto-fit and the drag restriction.
+   */
+  private readonly worldBounds: L.LatLngBounds = L.latLngBounds([
+    -60,
+    -180,
+  ], [85, 180]);
+
+  /** Fallback initial view (equator × prime meridian). */
+  readonly center: L.LatLngLiteral = { lat: 0, lng: 0 };
+  readonly zoom = 0;
+
+  /**
+   * Map behaviour options. Zoom controls are explicitly enabled; other default UI
+   * is kept minimal for a cleaner tracking view.
+   */
+  readonly mapOptions: L.MapOptions = {
+    zoomControl: true,
+    minZoom: 2,
+    maxZoom: 18,
+  };
+
+  /** The current tile layer (swapped when the theme changes). */
+  private tileLayer?: L.TileLayer;
+
   constructor() {
-    // Re-apply map styles whenever the shared day/night theme changes. The
-    // effect also runs once on creation; it no-ops until the map exists, and
-    // onMapInitialized applies the current theme as soon as it does.
+    // Re-apply map styles whenever the shared day/night theme changes.
     effect(() => {
-      // Track the theme so this re-runs on toggle; applyMapStyle picks the
-      // correct style for the current theme + zoom.
       this.mapTheme.theme();
       this.applyMapStyle();
     });
   }
 
-  /**
-   * Bounds of the whole world map. ~85.05° is the latitude edge of the Web
-   * Mercator projection Google Maps uses; full longitude (-180..180) is the
-   * whole east/west span. Reused for both the initial auto-fit and the drag
-   * restriction so the two can never drift out of sync.
-   */
-  private readonly worldBounds: google.maps.LatLngBoundsLiteral = {
-    north: 85,
-    south: -60,
-    west: -180,
-    east: 180,
-  };
+  ngAfterViewInit(): void {
+    try {
+      const el = this.mapContainer().nativeElement;
+      this.map = L.map(el, {
+        ...this.mapOptions,
+        center: [this.center.lat, this.center.lng],
+        zoom: this.zoom,
+        layers: [tileLayerFor(this.mapTheme.theme())],
+        // Stop the map from dragging past the edges of the world into the grey
+        // void beyond the poles. maxBounds keeps the *entire viewport* inside
+        // these bounds (not just the centre), so the map always fills the view.
+        maxBounds: this.worldBounds,
+        maxBoundsViscosity: 1.0,
+      });
 
-  /**
-   * Fallback initial view (equator × prime meridian). The real framing is set
-   * by fitBounds() in onMapInitialized once the map's pixel size is known.
-   */
-  readonly center: google.maps.LatLngLiteral = { lat: 0, lng: 0 };
-  readonly zoom = 0;
+      // Initial view: honour a shareable /lat,lng/zoom URL if present, else fit
+      // the whole world (first visit / bare `/`). fitBounds recomputes both
+      // center and zoom to frame these bounds; setView is the direct equivalent
+      // when the URL already specifies both.
+      const view = this.parseUrlView();
+      if (view) {
+        this.map.setView([view.lat, view.lng], view.zoom);
+      } else {
+        this.map.fitBounds(this.worldBounds, { padding: [0, 0] });
+      }
+      this.mapReady = true;
 
-  /**
-   * Map behaviour options. Zoom controls are explicitly enabled (the "+ / -"
-   * buttons); other default UI is kept minimal for a cleaner tracking view.
-   */
-  readonly mapOptions: google.maps.MapOptions = {
-    zoomControl: true,
-    mapTypeControl: false,
-    streetViewControl: false,
-    fullscreenControl: false,
-    // Slow down / smooth out scroll-wheel zoom. The Maps API has no direct
-    // zoom-speed option; enabling fractional zoom lets the map settle on
-    // non-integer levels, so each wheel step is a smaller, smoother increment
-    // instead of snapping a whole level at a time.
-    isFractionalZoomEnabled: true,
-    // Floor low enough that fitBounds() can zoom out to frame the whole world;
-    // `strictBounds` still prevents any grey void. Upper bound keeps detail useful.
-    minZoom: 2,
-    maxZoom: 18,
-    // Stop the map from dragging past the edges of the world into the grey void
-    // beyond the poles. `strictBounds` keeps the *entire viewport* inside these
-    // bounds (not just the centre), so the map always fills the view vertically.
-    restriction: {
-      latLngBounds: this.worldBounds,
-      strictBounds: true,
-    },
-  };
+      // Re-apply when zoom crosses the label threshold.
+      this.map.on('zoomend', () => this.applyMapStyle());
 
-  /**
-   * Fired once the underlying google.maps.Map exists. We fit the whole world
-   * into the panel so the entire map is visible regardless of the container's
-   * size or aspect ratio — fitBounds recomputes center + zoom to frame these
-   * bounds exactly. Padding 0 avoids leaving a grey margin around the world.
-   */
-  onMapInitialized(map: google.maps.Map): void {
-    // Capture the instance so the theme effect can restyle it on toggle.
-    this.map = map;
+      // Sync URL after every pan/zoom settles. `moveend` fires once when the
+      // user stops, not per-frame during a drag — no extra debounce needed.
+      this.map.on('moveend', () => this.zone.run(() => this.writeUrlView()));
 
-    // Initial view: honour a shareable /lat,lng/zoom URL if present, else fit
-    // the whole world (first visit / bare `/`). fitBounds recomputes both
-    // center and zoom to frame these bounds; setCenter+setZoom is the direct
-    // equivalent when the URL already specifies both.
-    const view = this.parseUrlView();
-    if (view) {
-      map.setCenter({ lat: view.lat, lng: view.lng });
-      map.setZoom(view.zoom);
-    } else {
-      map.fitBounds(this.worldBounds, 1);
-    }
-    // Apply the muted/grey style for the current theme + zoom.
-    this.applyMapStyle();
+      // Clicking empty map (not a marker) clears the selection / closes the panel.
+      this.map.on('click', () => this.zone.run(() => this.clearSelection()));
 
-    // Re-apply when zoom crosses the label threshold (applyMapStyle no-ops
-    // otherwise, so frequent fractional-zoom events stay cheap).
-    map.addListener('zoom_changed', () => this.applyMapStyle());
-
-    // Sync URL after every pan/zoom settles. `idle` is the Maps API's built-in
-    // "movement done" signal, so it's naturally debounced (fires once when the
-    // user stops, not per-frame during a drag) — no extra debounce needed.
-    map.addListener('idle', () => this.zone.run(() => this.writeUrlView()));
-
-    // Clicking empty map (not a marker) clears the selection / closes the panel.
-    map.addListener('click', () => this.zone.run(() => this.clearSelection()));
-
-    // Drive the markers from an animation-frame loop, outside Angular so we
-    // don't run change detection ~60×/sec. Each frame we read the live fleet
-    // from the WebSocket feed and move the marker DOM directly — smooth motion,
-    // no per-frame CD.
-    this.zone.runOutsideAngular(() => {
-      const animate = () => {
-        const fleet = this.liveFleet();
-        this.syncAircraftMarkers(fleet);
-        this.updateRoute(fleet);
-        this.updateFollow(fleet);
+      // Drive the markers from an animation-frame loop, outside Angular so we
+      // don't run change detection ~60×/sec. Each frame we read the live fleet
+      // from the WebSocket feed and move the marker DOM directly — smooth motion,
+      // no per-frame CD.
+      this.zone.runOutsideAngular(() => {
+        const animate = () => {
+          const fleet = this.liveFleet();
+          this.syncAircraftMarkers(fleet);
+          this.updateRoute(fleet);
+          this.updateFollow(fleet);
+          this.animationFrameId = requestAnimationFrame(animate);
+        };
         this.animationFrameId = requestAnimationFrame(animate);
-      };
-      this.animationFrameId = requestAnimationFrame(animate);
-    });
+      });
+
+      this.cdr.markForCheck();
+    } catch (error) {
+      this.loadError =
+        error instanceof Error ? error.message : 'Failed to load the map.';
+      this.cdr.markForCheck();
+    }
   }
 
   /**
    * Parse the current URL's `/lat,lng/zoom` segment (FR24-style shareable view).
    * Returns null if the URL isn't in that form, the numbers are out of range,
    * or the app is on the 3D-view route (where the URL means something else).
-   * The map bootstraps from this on init; if it's null, fitBounds runs instead.
    */
   private parseUrlView(): { lat: number; lng: number; zoom: number } | null {
     const url = this.router.url.split('?')[0].split('#')[0];
@@ -316,11 +303,13 @@ export class MapComponent implements OnInit, OnDestroy {
     if (!isFinite(lat) || !isFinite(lng) || !isFinite(zoom)) {
       return null;
     }
-    // Clamp to the ranges the map itself enforces (worldBounds + min/maxZoom).
-    if (lat < this.worldBounds.south || lat > this.worldBounds.north) {
+    if (
+      lat < this.worldBounds.getSouth() ||
+      lat > this.worldBounds.getNorth()
+    ) {
       return null;
     }
-    if (lng < this.worldBounds.west || lng > this.worldBounds.east) {
+    if (lng < this.worldBounds.getWest() || lng > this.worldBounds.getEast()) {
       return null;
     }
     const minZoom = this.mapOptions.minZoom ?? 0;
@@ -334,8 +323,6 @@ export class MapComponent implements OnInit, OnDestroy {
   /**
    * Write the map's current center+zoom into the URL as `/lat,lng/zoom`,
    * using `replaceUrl` so pan/zoom doesn't pollute the browser back-stack.
-   * Skipped on the 3D-view route (we don't own that URL) and when the value
-   * would be identical to what's already there (no-op guard).
    */
   private writeUrlView(): void {
     if (!this.map) {
@@ -349,10 +336,8 @@ export class MapComponent implements OnInit, OnDestroy {
     if (!center || zoom === undefined) {
       return;
     }
-    const lat = center.lat().toFixed(URL_COORD_DECIMALS);
-    const lng = center.lng().toFixed(URL_COORD_DECIMALS);
-    // Fractional-zoom-friendly, but trim trailing zeros so /11 stays as /11
-    // (not /11.00) — same value, shorter to share.
+    const lat = center.lat.toFixed(URL_COORD_DECIMALS);
+    const lng = center.lng.toFixed(URL_COORD_DECIMALS);
     const z = zoom.toFixed(URL_ZOOM_DECIMALS).replace(/\.?0+$/, '');
     const path = `/${lat},${lng}/${z}`;
     if (path === this.router.url) {
@@ -362,9 +347,8 @@ export class MapComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Apply the map style for the current theme + zoom. Only calls setOptions when
-   * the effective style actually changes (theme flip, or zoom crossing the label
-   * threshold), so the frequent fractional-zoom events don't thrash the map.
+   * Apply the map style for the current theme + zoom. Swaps the tile layer
+   * when the theme changes (day → OSM, night → CartoDB Dark Matter).
    */
   private applyMapStyle(): void {
     if (!this.map) {
@@ -378,7 +362,13 @@ export class MapComponent implements OnInit, OnDestroy {
       return;
     }
     this.lastStyleKey = key;
-    this.map.setOptions({ styles: mapStyleFor(theme, zoom) });
+
+    // Swap the tile layer for the current theme.
+    if (this.tileLayer) {
+      this.map.removeLayer(this.tileLayer);
+    }
+    this.tileLayer = tileLayerFor(theme);
+    this.tileLayer.addTo(this.map);
   }
 
   /**
@@ -405,10 +395,10 @@ export class MapComponent implements OnInit, OnDestroy {
         continue;
       }
       present.add(plane.flightId);
-      const position: google.maps.LatLngLiteral = {
-        lat: plane.latitude,
-        lng: plane.longitude,
-      };
+      const position: L.LatLngExpression = [
+        plane.latitude,
+        plane.longitude,
+      ];
       // Live values that change each tick and drive the hover card.
       const stats: AircraftLiveStats = {
         altitudeFt: plane.altitude,
@@ -460,7 +450,8 @@ export class MapComponent implements OnInit, OnDestroy {
    */
   private cardInfoFor(plane: Aircraft): AircraftCardInfo {
     const photoUrl =
-      SEED_FLIGHTS.find((seed) => seed.flightId === plane.flightId)?.photo ?? '';
+      SEED_FLIGHTS.find((seed) => seed.flightId === plane.flightId)?.photo ??
+      '';
     return {
       flightCode: plane.flightId,
       aircraftType: plane.aircraft,
@@ -522,7 +513,7 @@ export class MapComponent implements OnInit, OnDestroy {
   /**
    * Toggle follow mode. Enabling it draws the route path (like the Route action)
    * but WITHOUT fitting/zooming — the view stays at the current zoom and simply
-   * pans to keep the plane centred (updateFollow only calls setCenter). Follow
+   * pans to keep the plane centred (updateFollow only calls panTo). Follow
    * and Route are mutually exclusive, so turning follow on clears the Route
    * action's highlight; turning it off removes the path.
    */
@@ -560,8 +551,8 @@ export class MapComponent implements OnInit, OnDestroy {
       : undefined;
     if (plane) {
       // panTo animates the move (smooth glide) rather than jumping like
-      // setCenter, so each periodic re-centre eases toward the plane.
-      this.map.panTo({ lat: plane.latitude, lng: plane.longitude });
+      // setView, so each periodic re-centre eases toward the plane.
+      this.map.panTo([plane.latitude, plane.longitude]);
       this.lastFollowPanMs = now;
     }
   }
@@ -604,15 +595,27 @@ export class MapComponent implements OnInit, OnDestroy {
     }
 
     this.ensureRouteObjects();
-    const originPos = { lat: origin.latitude, lng: origin.longitude };
-    const destPos = { lat: destination.latitude, lng: destination.longitude };
+    const originPos: L.LatLngExpression = [
+      origin.latitude,
+      origin.longitude,
+    ];
+    const destPos: L.LatLngExpression = [
+      destination.latitude,
+      destination.longitude,
+    ];
 
-    this.originMarker!.setPosition(originPos);
-    this.originMarker!.setTitle(origin.name);
-    this.originMarker!.setLabel(this.airportLabel(plane.source));
-    this.destMarker!.setPosition(destPos);
-    this.destMarker!.setTitle(destination.name);
-    this.destMarker!.setLabel(this.airportLabel(plane.destination));
+    this.originMarker!.setLatLng(originPos);
+    this.originMarker!.bindTooltip(origin.name, {
+      permanent: false,
+      direction: 'top',
+      offset: [0, -8],
+    });
+    this.destMarker!.setLatLng(destPos);
+    this.destMarker!.bindTooltip(destination.name, {
+      permanent: false,
+      direction: 'top',
+      offset: [0, -8],
+    });
 
     for (const obj of [
       this.solidLine,
@@ -620,18 +623,18 @@ export class MapComponent implements OnInit, OnDestroy {
       this.originMarker,
       this.destMarker,
     ]) {
-      obj?.setMap(this.map);
+      obj?.addTo(this.map);
     }
     this.updateRoute([plane]); // draw the initial split immediately
 
     if (fit) {
       // Fit origin + plane + destination into view; extra left padding keeps the
       // route clear of the details panel on the left edge.
-      const bounds = new google.maps.LatLngBounds();
-      bounds.extend(originPos);
-      bounds.extend({ lat: plane.latitude, lng: plane.longitude });
-      bounds.extend(destPos);
-      this.map.fitBounds(bounds, { top: 90, right: 60, bottom: 60, left: 380 });
+      const bounds = L.latLngBounds([originPos, destPos]);
+      bounds.extend([plane.latitude, plane.longitude]);
+      this.map.fitBounds(bounds, {
+        padding: [380, 60], // [left/right, top/bottom] — leaflet padding is [topBottom, leftRight]
+      });
     }
   }
 
@@ -660,14 +663,14 @@ export class MapComponent implements OnInit, OnDestroy {
     if (!origin || !destination) {
       return;
     }
-    const planePos = { lat: plane.latitude, lng: plane.longitude };
-    this.solidLine.setPath([
-      { lat: origin.latitude, lng: origin.longitude },
+    const planePos: L.LatLngExpression = [plane.latitude, plane.longitude];
+    this.solidLine.setLatLngs([
+      [origin.latitude, origin.longitude],
       planePos,
     ]);
-    this.dashedLine.setPath([
+    this.dashedLine.setLatLngs([
       planePos,
-      { lat: destination.latitude, lng: destination.longitude },
+      [destination.latitude, destination.longitude],
     ]);
   }
 
@@ -683,26 +686,21 @@ export class MapComponent implements OnInit, OnDestroy {
       this.originMarker,
       this.destMarker,
     ]) {
-      obj?.setMap(null);
+      obj?.remove();
     }
     this.routeActive.set(false);
     this.followActive.set(false);
   }
 
   /**
-   * IATA-code label shown above an airport pin. `className` lets the chip be
-   * styled + themed via global CSS (.route-ap-label); color is forced there.
+   * IATA-code label shown above an airport pin. Leaflet uses tooltips instead
+   * of MarkerLabel; the text is set via bindTooltip.
    */
-  private airportLabel(code: string): google.maps.MarkerLabel {
-    return {
-      text: code,
-      className: 'route-ap-label',
-      fontSize: '11px',
-      fontWeight: '700',
-    };
+  private airportLabel(code: string): string {
+    return code;
   }
 
-  /** Lazily create the route polylines + airport markers (needs google.maps). */
+  /** Lazily create the route polylines + airport markers (needs Leaflet). */
   private ensureRouteObjects(): void {
     if (this.solidLine) {
       return;
@@ -711,49 +709,41 @@ export class MapComponent implements OnInit, OnDestroy {
     // in sync with it).
     const ACCENT = '#38bdf8';
 
-    this.solidLine = new google.maps.Polyline({
-      strokeColor: ACCENT,
-      strokeOpacity: 1,
-      strokeWeight: 3,
-      // Follow the great circle (curved) rather than a straight screen line —
-      // more realistic, and noticeable on longer routes.
-      geodesic: true,
-      zIndex: 3,
+    this.solidLine = L.polyline([], {
+      color: ACCENT,
+      weight: 3,
+      opacity: 1,
+      // Leaflet polylines are straight lines on the screen; Leaflet does not
+      // support geodesic (great-circle) lines natively like Google Maps.
     });
 
-    // Dashed line: hide the stroke and repeat a short line symbol along it.
-    const dash: google.maps.Symbol = {
-      path: 'M 0,-1 0,1',
-      strokeColor: ACCENT,
-      strokeOpacity: 1,
-      strokeWeight: 3,
-      scale: 3,
-    };
-    this.dashedLine = new google.maps.Polyline({
-      strokeOpacity: 0,
-      geodesic: true,
-      icons: [{ icon: dash, offset: '0', repeat: '14px' }],
-      zIndex: 3,
+    // Dashed line: use dashArray for the dashed pattern.
+    this.dashedLine = L.polyline([], {
+      color: ACCENT,
+      weight: 3,
+      opacity: 1,
+      dashArray: '6, 12',
     });
 
     // Airport pin PNGs (public/markers). They're portrait pins (1070×1200) with
     // the tip at the bottom centre, so anchor there — the tip sits on the airport.
     const pinHeight = 30;
     const pinWidth = Math.round((pinHeight * 1070) / 1200);
-    const pinIcon = (url: string): google.maps.Icon => ({
-      url,
-      scaledSize: new google.maps.Size(pinWidth, pinHeight),
-      anchor: new google.maps.Point(pinWidth / 2, pinHeight),
-      // Float the airport-code label just above the top of the pin.
-      labelOrigin: new google.maps.Point(pinWidth / 2, -8),
-    });
-    this.originMarker = new google.maps.Marker({
+    const pinIcon = (url: string): L.Icon => ({
+      ...L.icon({
+        iconUrl: url,
+        iconSize: [pinWidth, pinHeight],
+        iconAnchor: [pinWidth / 2, pinHeight],
+        popupAnchor: [0, -8],
+      }),
+    } as L.Icon);
+    this.originMarker = L.marker([0, 0], {
       icon: pinIcon('markers/source.png'),
-      zIndex: 4,
+      zIndexOffset: 4,
     });
-    this.destMarker = new google.maps.Marker({
+    this.destMarker = L.marker([0, 0], {
       icon: pinIcon('markers/destination.png'),
-      zIndex: 4,
+      zIndexOffset: 4,
     });
   }
 
@@ -763,20 +753,7 @@ export class MapComponent implements OnInit, OnDestroy {
     this.selectedFlightId.set(null);
   }
 
-  ngOnInit(): void {
-    this.mapsLoader
-      .load()
-      .then(() => {
-        this.mapReady = true;
-        // OnPush + async resolution: trigger change detection manually.
-        this.cdr.markForCheck();
-      })
-      .catch((error: unknown) => {
-        this.loadError =
-          error instanceof Error ? error.message : 'Failed to load the map.';
-        this.cdr.markForCheck();
-      });
-  }
+  ngOnInit(): void {}
 
   ngOnDestroy(): void {
     // Stop the animation loop and detach all overlays so nothing leaks if the
@@ -788,6 +765,10 @@ export class MapComponent implements OnInit, OnDestroy {
       marker.setMap(null);
     }
     this.markers.clear();
-    this.resetFlightModes();
+    this.hideRoute();
+    if (this.map) {
+      this.map.remove();
+      this.map = undefined;
+    }
   }
 }

@@ -1,16 +1,8 @@
 <div class="map">
   @if (mapReady) {
-    <!-- Aircraft markers are custom rotatable OverlayViews managed in the
-         component (see syncAircraftMarkers), not declarative <map-marker>s. -->
-    <google-map
-      class="map__canvas"
-      width="100%"
-      height="100%"
-      [center]="center"
-      [zoom]="zoom"
-      [options]="mapOptions"
-      (mapInitialized)="onMapInitialized($event)"
-    />
+    <!-- Leaflet map canvas. Markers are custom rotatable L.Layer instances
+         managed imperatively in the component (see syncAircraftMarkers). -->
+    <div #mapContainer class="map__canvas"></div>
 
     <!-- Floating details panel for the selected aircraft -->
     @if (selectedFlightInfo(); as info) {
