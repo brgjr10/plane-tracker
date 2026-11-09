@@ -1,27 +1,27 @@
 <div class="map">
-  @if (mapReady) {
-    <!-- Leaflet map canvas. Markers are custom rotatable L.Layer instances
-         managed imperatively in the component (see syncAircraftMarkers). -->
-    <div #mapContainer class="map__canvas"></div>
+  <!-- Leaflet map canvas. Always in the DOM so viewChild queries it in
+       ngAfterViewInit; Leaflet initialises on it once mapReady is true. -->
+  <div #mapContainer class="map__canvas"></div>
 
-    <!-- Floating details panel for the selected aircraft -->
-    @if (selectedFlightInfo(); as info) {
-      <app-aircraft-info-panel
-        class="map__panel"
-        [info]="info"
-        [activeActions]="activeActions()"
-        (close)="clearSelection()"
-        (action)="onPanelAction($event)"
-      />
-    }
-  } @else if (loadError) {
-    <div class="map__status map__status--error" role="alert">
-      <p>Map failed to load.</p>
-      <p class="map__status-detail">{{ loadError }}</p>
+  @if (!mapReady) {
+    <div class="map__status" role="status" [class.map__status--error]="loadError">
+      @if (loadError) {
+        <p>Map failed to load.</p>
+        <p class="map__status-detail">{{ loadError }}</p>
+      } @else {
+        <p>Loading map…</p>
+      }
     </div>
-  } @else {
-    <div class="map__status" role="status">
-      <p>Loading map…</p>
-    </div>
+  }
+
+  <!-- Floating details panel for the selected aircraft -->
+  @if (selectedFlightInfo(); as info) {
+    <app-aircraft-info-panel
+      class="map__panel"
+      [info]="info"
+      [activeActions]="activeActions()"
+      (close)="clearSelection()"
+      (action)="onPanelAction($event)"
+    />
   }
 </div>

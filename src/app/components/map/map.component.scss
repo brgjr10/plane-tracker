@@ -12,16 +12,17 @@
   }
 
   &__status {
+    position: absolute;
+    inset: 0;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     gap: 0.25rem;
-    width: 100%;
-    height: 100%;
     color: #5a6b7b;
     background: #eef2f6;
     text-align: center;
+    z-index: 10;
 
     &--error {
       color: #8a1f1f;
