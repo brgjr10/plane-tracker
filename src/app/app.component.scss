@@ -11,10 +11,10 @@ app-header {
   top: 0;
   left: 0;
   right: 0;
-  z-index: 10;
+  z-index: 20; /* above the map canvas (z-index 0) */
 }
 
-// Map fills the whole viewport; the header floats on top.
+// Map fills the whole viewport behind the header.
 .app-main {
   height: 100%;
 }
