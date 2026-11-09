@@ -39,12 +39,12 @@ import {
  * rendered as a persistent credit line in the component template.
  */
 
-/** Zoom level: a z10 tile is ~35–38 km on the ground over India — a 5×5 grid ≈ 180 km. */
-export const TILE_ZOOM = 10;
-/** Grid radius in tiles from the centre (2 → a 5×5 grid). */
-const GRID_RADIUS = 2;
-/** Vertex subdivision per tile edge (heightmaps are 256px; 96 samples them well). */
-const TILE_SEGMENTS = 96;
+/** Zoom level: z11 tiles are ~18–19 km on the ground over India — a 7×7 grid ≈ 130 km. */
+export const TILE_ZOOM = 11;
+/** Grid radius in tiles from the centre (3 → a 7×7 grid). */
+const GRID_RADIUS = 3;
+/** Vertex subdivision per tile edge (heightmaps are 256px; 128 samples them cleanly). */
+const TILE_SEGMENTS = 128;
 /** World units per tile edge. 5 tiles → a 400-unit grid; the outer ring fades into fog. */
 const TILE_UNITS = 80;
 /** Height relief multiplier over the true horizontal scale (drama vs. realism knob). */
@@ -320,7 +320,7 @@ export function createTileTerrain(
         tex.flipY = false; // uv(0,0) = top-left = tile's NW corner
         tex.wrapS = THREE.ClampToEdgeWrapping;
         tex.wrapT = THREE.ClampToEdgeWrapping;
-        tex.anisotropy = Math.min(8, maxAnisotropy);
+        tex.anisotropy = Math.min(16, maxAnisotropy);
         tex.needsUpdate = true;
         disposeTexture(tile.imageryTex);
         tile.imageryTex = tex;
