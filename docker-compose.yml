@@ -3,5 +3,5 @@ services:
   plane-tracker:
     build: .
     ports:
-      - "8080:8080"
+      - "5176:8080"
     restart: unless-stopped
