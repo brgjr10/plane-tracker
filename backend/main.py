@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 from datetime import datetime, timezone
 from typing import Dict, Optional
 
@@ -14,11 +15,45 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger("planetracker")
 
 OPENSKY_URL = "https://opensky-network.org/api/states/all"
+OPENSKY_TOKEN_URL = "https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token"
 BASE_POLL_INTERVAL_SEC = 10.0
 MAX_POLL_INTERVAL_SEC = 120.0
 
-OPENSKY_USERNAME = os.getenv("OPENSKY_USERNAME", "")
-OPENSKY_PASSWORD = os.getenv("OPENSKY_PASSWORD", "")
+OPENSKY_CLIENT_ID = os.getenv("OPENSKY_CLIENT_ID", "")
+OPENSKY_CLIENT_SECRET = os.getenv("OPENSKY_CLIENT_SECRET", "")
+
+# OAuth2 access token cache (Bearer token expires after 30 minutes)
+_token: Optional[str] = None
+_token_expires_at: float = 0.0
+
+
+async def get_access_token(client: httpx.AsyncClient) -> Optional[str]:
+    """Fetch or refresh an OpenSky OAuth2 access token via client credentials flow."""
+    global _token, _token_expires_at
+    now = time.time()
+    if _token and now < _token_expires_at - 60:  # 60s safety margin
+        return _token
+    if not OPENSKY_CLIENT_ID or not OPENSKY_CLIENT_SECRET:
+        return None
+    try:
+        resp = await client.post(
+            OPENSKY_TOKEN_URL,
+            data={
+                "grant_type": "client_credentials",
+                "client_id": OPENSKY_CLIENT_ID,
+                "client_secret": OPENSKY_CLIENT_SECRET,
+            },
+            timeout=15.0,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        _token = data["access_token"]
+        _token_expires_at = now + float(data.get("expires_in", 1800))
+        log.info("Obtained OpenSky OAuth2 access token (expires in ~%ds)", data.get("expires_in", 1800))
+        return _token
+    except Exception as exc:
+        log.exception("Failed to obtain OpenSky access token: %s", exc)
+        return None
 
 app = FastAPI(title="Plane Tracker Live Feed")
 
@@ -69,20 +104,20 @@ def opensky_to_aircraft(state: list) -> Optional[dict]:
 
 
 async def poll_opensky():
-    """Background task: poll OpenSky and broadcast to WebSocket clients.
+    """Background task: poll OpenSky via OAuth2 Bearer token and broadcast to WebSocket clients.
 
-    Uses optional OpenSky auth (OPENSKY_USERNAME / OPENSKY_PASSWORD env vars)
-    when available — unauthenticated requests are heavily rate limited (429).
-    On any failure the poller backs off exponentially up to MAX_POLL_INTERVAL_SEC
-    and resets to BASE_POLL_INTERVAL_SEC on success.
+    Uses OPENSKY_CLIENT_ID / OPENSKY_CLIENT_SECRET env vars to obtain an access token
+    via the client credentials flow. On any failure the poller backs off exponentially
+    up to MAX_POLL_INTERVAL_SEC and resets to BASE_POLL_INTERVAL_SEC on success.
     """
     log.info("OpenSky poller started")
     backoff = BASE_POLL_INTERVAL_SEC
-    auth = (OPENSKY_USERNAME, OPENSKY_PASSWORD) if OPENSKY_USERNAME else None
     async with httpx.AsyncClient(timeout=15.0) as client:
         while True:
             try:
-                resp = await client.get(OPENSKY_URL, auth=auth)
+                token = await get_access_token(client)
+                headers = {"Authorization": f"Bearer {token}"} if token else {}
+                resp = await client.get(OPENSKY_URL, headers=headers)
                 resp.raise_for_status()
                 data = resp.json()
                 states = data.get("states", []) or []

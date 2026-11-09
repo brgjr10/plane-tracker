@@ -6,5 +6,5 @@ services:
       - "5176:8080"
     restart: unless-stopped
     environment:
-      - OPENSKY_USERNAME=${OPENSKY_USERNAME:-}
-      - OPENSKY_PASSWORD=${OPENSKY_PASSWORD:-}
+      - OPENSKY_CLIENT_ID=${OPENSKY_CLIENT_ID:-}
+      - OPENSKY_CLIENT_SECRET=${OPENSKY_CLIENT_SECRET:-}
