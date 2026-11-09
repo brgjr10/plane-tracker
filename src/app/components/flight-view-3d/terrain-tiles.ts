@@ -233,10 +233,11 @@ export function createTileTerrain(
 
   // --- Build the fixed tile pool -------------------------------------------
   const tiles: Tile[] = [];
-  // Skirt depth: enough to cover max elevation × vertical exaggeration + margin.
-  // Max elev ~5000m, VERTICAL_EXAGGERATION=3 → 15000 world units. TILE_UNITS=80.
-  // 30 units is plenty (covers ~1000m real elevation at this scale).
-  const SKIRT_DEPTH = 30;
+  // Skirt depth: must exceed max possible vertex displacement so the vertical
+// walls reach "bedrock" even after the shader lifts the top surface.
+// Max elevation diff within a tile ~2000 m, elevScale ~1.2 → ~2400 units.
+// Use 20000 for a huge margin.
+  const SKIRT_DEPTH = 20000;
 
   for (let i = 0; i < (GRID_RADIUS * 2 + 1) ** 2; i++) {
     // Build a plane with skirts: a grid of (TILE_SEGMENTS+1)^2 top vertices +
@@ -357,10 +358,11 @@ export function createTileTerrain(
     geometry.computeBoundingSphere();
     // No need to rotate — vertices are already in XZ plane with Y up.
 
-    const material = new THREE.MeshStandardMaterial({
+const material = new THREE.MeshStandardMaterial({
       map: placeholderImagery,
       roughness: 1,
       metalness: 0,
+      side: THREE.DoubleSide, // skirts + displaced top can have inconsistent winding
     });
 
     const uElevScale = { value: elevScale };
