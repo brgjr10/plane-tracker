@@ -153,8 +153,13 @@ function patchMaterial(
       varying vec3 vTileNormal;
 
       // Decode Terrarium RGB (raw 0..1 bytes) → elevation in metres.
+      // Clamp to half-texel inset so edge vertices/normal taps don't sample
+      // outside the tile (ClampToEdge + independent tile meshes can create
+      // visible seams/"rips" at tile boundaries).
       float sampleElevM(vec2 uvh) {
-        vec3 e = texture2D(uHeightMap, uvh).rgb * 255.0;
+        float inset = 0.5 / ${HEIGHT_PX.toFixed(1)};
+        vec2 uv = clamp(uvh, vec2(inset), vec2(1.0 - inset));
+        vec3 e = texture2D(uHeightMap, uv).rgb * 255.0;
         return (e.r * 256.0 + e.g + e.b / 256.0) - 32768.0;
       }
     ` + shader.vertexShader;
@@ -248,6 +253,9 @@ export function createTileTerrain(
     patchMaterial(material, uElevScale, uTint, uHeightMap);
 
     const mesh = new THREE.Mesh(geometry, material);
+    // Slight overlap hides hairline cracks between independently displaced
+    // tiles (edge height/normal sampling can differ at shared borders).
+    mesh.scale.set(1.004, 1, 1.004);
     mesh.frustumCulled = false; // tiles are repositioned every frame; skip stale culling
     group.add(mesh);
 
@@ -325,6 +333,9 @@ export function createTileTerrain(
         // tiles line up at their edges.
         tex.repeat.set(-1, 1);
         tex.offset.set(1, 0);
+        tex.magFilter = THREE.LinearFilter;
+        tex.minFilter = THREE.LinearFilter;
+        tex.generateMipmaps = false;
         tex.anisotropy = Math.min(16, maxAnisotropy);
         tex.needsUpdate = true;
         disposeTexture(tile.imageryTex);
