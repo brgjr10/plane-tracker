@@ -145,8 +145,11 @@ export class FlightView3dComponent implements AfterViewInit, OnDestroy {
     if (!this.flightId) {
       return null;
     }
+    const fleet = this.liveFlights.fleet();
+    const id = this.flightId.trim().toUpperCase();
     return (
-      this.liveFlights.fleet().find((plane) => plane.flightId === this.flightId) ??
+      fleet.find((plane) => plane.flightId.toUpperCase() === id) ??
+      fleet.find((plane) => (plane as any).icao24?.toUpperCase?.() === id) ??
       null
     );
   });
@@ -298,7 +301,7 @@ export class FlightView3dComponent implements AfterViewInit, OnDestroy {
     this.renderer.setSize(width, height, false);
 
     this.scene = new THREE.Scene();
-    this.scene.fog = new THREE.Fog(0x000000, 40, 160);
+    this.scene.fog = new THREE.Fog(0x000000, 90, 360);
 
     this.camera = new THREE.PerspectiveCamera(55, width / height, 0.1, 2000);
     // Start behind + above the aircraft (third-person); the chase loop keeps it there.
@@ -346,17 +349,23 @@ export class FlightView3dComponent implements AfterViewInit, OnDestroy {
       // One delta per frame (clamped so a background tab doesn't teleport things).
       const dt = Math.min(this.threeClock.getDelta(), 0.1);
       let speedKts = 0;
-      if (this.model && this.flightId) {
-        const plane = this.liveFlights
-          .fleet()
-          .find((p) => p.flightId === this.flightId);
+      if (this.flightId) {
+        const id = this.flightId.trim().toUpperCase();
+        const fleet = this.liveFlights.fleet();
+        const plane =
+          fleet.find((p) => p.flightId.toUpperCase() === id) ??
+          fleet.find((p) => (p as any).icao24?.toUpperCase?.() === id);
         if (plane) {
-          // Heading is compass degrees (CW from north); Three yaw is CCW.
-          this.model.rotation.y = THREE.MathUtils.degToRad(
-            MODEL_YAW_OFFSET_DEG - plane.heading,
-          );
+          if (this.model) {
+            // Heading is compass degrees (CW from north); Three yaw is CCW.
+            this.model.rotation.y = THREE.MathUtils.degToRad(
+              MODEL_YAW_OFFSET_DEG - plane.heading,
+            );
+          }
           speedKts = plane.speed;
           // Anchor the real-world terrain to the aircraft's live position.
+          // Run even if the model hasn't loaded so tiles/ground anchor as soon
+          // as live data is available (avoids a flat placeholder scene).
           this.terrain?.setView(plane.latitude, plane.longitude, plane.altitude);
         }
       }

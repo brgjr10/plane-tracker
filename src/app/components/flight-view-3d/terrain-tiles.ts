@@ -39,10 +39,10 @@ import {
  * rendered as a persistent credit line in the component template.
  */
 
-/** Zoom level: z11 tiles are ~18–19 km on the ground over India — a 7×7 grid ≈ 130 km. */
-export const TILE_ZOOM = 11;
-/** Grid radius in tiles from the centre (3 → a 7×7 grid). */
-const GRID_RADIUS = 3;
+/** Zoom level: z12 tiles give sharper satellite/relief detail. A 9×9 grid (~85 km at mid-lats) keeps coverage while fog hides edges. */
+export const TILE_ZOOM = 12;
+/** Grid radius in tiles from the centre (4 → a 9×9 grid). */
+const GRID_RADIUS = 4;
 /** Vertex subdivision per tile edge (heightmaps are 256px; 128 samples them cleanly). */
 const TILE_SEGMENTS = 128;
 /** World units per tile edge. 5 tiles → a 400-unit grid; the outer ring fades into fog. */

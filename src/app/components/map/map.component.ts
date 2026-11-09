@@ -706,30 +706,37 @@ export class MapComponent
   }
 
   /**
-   * Toggle follow mode. Enabling it draws the route path (like the Route action)
-   * but WITHOUT fitting/zooming — the view stays at the current zoom and simply
-   * pans to keep the plane centred (updateFollow only calls panTo). Follow
-   * and Route are mutually exclusive, so turning follow on clears the Route
-   * action's highlight; turning it off removes the path.
+   * Toggle follow mode. Keeps the map centred on the selected plane without
+   * fitting/zooming. When origin/destination airports are known, the route path
+   * is also drawn (without fitting) — matching FR24-style follow. Live ADS-B
+   * flights often lack route metadata, so follow still works as pure tracking.
+   * Follow and Route are mutually exclusive.
    */
   private toggleFollow(): void {
     const plane = this.selectedAircraft();
     if (!plane || !this.map) {
       return;
     }
-    if (!this.hasRouteData(plane)) {
-      // Follow mode draws a route path; without origin/destination airports
-      // there is nothing to draw.
-      return;
-    }
     if (this.followActive()) {
-      this.hideRoute(); // turn follow off → remove the path
+      this.followActive.set(false);
+      // Keep route overlays only if route mode is active; follow alone draws no
+      // exclusive state that must persist beyond its signal.
+      if (!this.routeActive()) {
+        this.hideRoute();
+      }
       return;
     }
     this.routeActive.set(false); // mutual exclusion with the Route action
+    this.hideRoute();
     this.followActive.set(true);
     this.lastFollowPanMs = 0; // centre on the plane immediately on the next frame
-    this.showRouteFor(plane, false); // draw the path, but keep the current zoom
+    if (this.hasRouteData(plane)) {
+      // Draw the path without fitting/zooming when route data exists.
+      this.showRouteFor(plane, false);
+    } else {
+      this.map.panTo([plane.latitude, plane.longitude]);
+      this.lastFollowPanMs = performance.now();
+    }
   }
 
   /**
