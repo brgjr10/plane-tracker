@@ -621,7 +621,6 @@ export class MapComponent
                 this.resetFlightModes();
               }
               this.selectedFlightId.set(plane.flightId);
-              this.followActive.set(false);
               // Only activate route mode when origin/destination airports are
               // resolvable. Live OpenSky flights carry empty source/destination
               // codes, so the route overlay cannot draw for them.
@@ -713,11 +712,6 @@ export class MapComponent
    * and Route are mutually exclusive, so turning follow on clears the Route
    * action's highlight; turning it off removes the path.
    */
-  /** True when both origin and destination airports resolve from the seed map. */
-  private hasRouteData(plane: Aircraft): boolean {
-    return Boolean(AIRPORTS[plane.source] && AIRPORTS[plane.destination]);
-  }
-
   private toggleFollow(): void {
     const plane = this.selectedAircraft();
     if (!plane || !this.map) {
@@ -787,6 +781,13 @@ export class MapComponent
     this.routeActive.set(true);
     this.showRouteFor(plane, true); // draw the path and fit it into view
   }
+
+  /** True when both origin and destination airports resolve from the seed map. */
+  private hasRouteData(plane: Aircraft): boolean {
+    return Boolean(AIRPORTS[plane.source] && AIRPORTS[plane.destination]);
+  }
+
+  /** Clear per-flight modes (route + follow) when selection changes or clears. */
   private resetFlightModes(): void {
     this.hideRoute(); // detaches the path and clears both action signals
   }

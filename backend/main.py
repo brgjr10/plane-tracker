@@ -21,11 +21,6 @@ MAX_POLL_INTERVAL_SEC = 120.0
 
 OPENSKY_CLIENT_ID = os.getenv("OPENSKY_CLIENT_ID", "")
 OPENSKY_CLIENT_SECRET = os.getenv("OPENSKY_CLIENT_SECRET", "")
-if not OPENSKY_CLIENT_ID or not OPENSKY_CLIENT_SECRET:
-    log.warning(
-        "OPENSKY_CLIENT_ID / OPENSKY_CLIENT_SECRET not set — live OpenSky feed "
-        "will be unavailable (token fetch will be skipped)."
-    )
 
 # OAuth2 access token cache (Bearer token expires after 30 minutes)
 _token: Optional[str] = None
@@ -195,14 +190,7 @@ async def flights_rest():
 
 
 # Serve the built Angular frontend
-STATIC_DIR = "/app/dist/plane-tracker/browser"
-if not os.path.isdir(STATIC_DIR):
-    log.warning(
-        "Angular frontend not built at %s — run `ng build` before starting "
-        "the backend, or static routes will 404.",
-        STATIC_DIR,
-    )
-app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
+app.mount("/", StaticFiles(directory="/app/dist/plane-tracker/browser", html=True), name="static")
 
 @app.get("/{full_path:path}")
 async def spa(full_path: str):

@@ -51,3 +51,4 @@ Thumbs.db
 CLAUDE.*
 .claude/*
 /docs/*
+__pycache__/
