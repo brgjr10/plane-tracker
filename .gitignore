@@ -42,9 +42,10 @@ testem.log
 Thumbs.db
 
 # Environment files holding real API keys (Google Maps key must never be committed).
-# The committed template is environment.example.ts — copy it to environment.ts locally.
-/src/environments/environment.ts
-/src/environments/environment.prod.ts
+# The committed template is environment.example.ts.
+# environment.ts and environment.prod.ts are committed as placeholders so the
+# Angular build works from a fresh clone; add your real Google Maps API key
+# locally in environment.ts (do not commit it with a real key).
 
 # CLAUDE files
 CLAUDE.*
