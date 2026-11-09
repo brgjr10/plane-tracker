@@ -320,6 +320,11 @@ export function createTileTerrain(
         tex.flipY = false; // uv(0,0) = top-left = tile's NW corner
         tex.wrapS = THREE.ClampToEdgeWrapping;
         tex.wrapT = THREE.ClampToEdgeWrapping;
+        // World frame uses east = -X (matches aircraft yaw). Mirror imagery
+        // horizontally so geographic content aligns with that frame and adjacent
+        // tiles line up at their edges.
+        tex.repeat.set(-1, 1);
+        tex.offset.set(1, 0);
         tex.anisotropy = Math.min(16, maxAnisotropy);
         tex.needsUpdate = true;
         disposeTexture(tile.imageryTex);
@@ -366,6 +371,9 @@ export function createTileTerrain(
       tex.flipY = false; // match imagery + the canvas decode orientation
       tex.wrapS = THREE.ClampToEdgeWrapping;
       tex.wrapT = THREE.ClampToEdgeWrapping;
+      // Mirror to match the east = -X world frame (keeps elevation aligned with imagery).
+      tex.repeat.set(-1, 1);
+      tex.offset.set(1, 0);
       tex.needsUpdate = true;
       disposeTexture(tile.heightTex);
       tile.heightTex = tex;
