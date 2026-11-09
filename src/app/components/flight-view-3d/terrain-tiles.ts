@@ -317,43 +317,37 @@ export function createTileTerrain(
       }
     }
 
-    // Skirt triangles: connect each edge top vertex to its skirt vertex
+    // Skirt triangles: for each edge, connect each top edge vertex to its
+    // corresponding skirt vertex and the next top edge vertex.
+    // Each edge has seg segments → seg skirt vertices → seg triangles.
     const skirtBase = topCount;
-    // Bottom edge (south) — connect top row z=0 to skirt vertices 0..seg-1
+    // Bottom edge (south, z=0): top vertices 0..seg, skirt vertices 0..seg-1
     for (let x = 0; x < seg; x++) {
-      const topIdx = x; // z=0 row
-      const skirtIdx = skirtBase + x;
+      const topIdx = x;
       const nextTop = x + 1;
-      const nextSkirt = skirtBase + x + 1;
+      const skirtIdx = skirtBase + x;
       indices.push(topIdx, skirtIdx, nextTop);
-      indices.push(nextTop, skirtIdx, nextSkirt);
     }
-    // Top edge (north) — connect top row z=seg to next seg skirt vertices
+    // Top edge (north, z=seg): top vertices seg*(seg+1) .. seg*(seg+1)+seg
     for (let x = 0; x < seg; x++) {
       const topIdx = seg * (seg + 1) + x;
-      const skirtIdx = skirtBase + seg + x;
       const nextTop = seg * (seg + 1) + x + 1;
-      const nextSkirt = skirtBase + seg + x + 1;
-      indices.push(topIdx, nextTop, skirtIdx);
-      indices.push(skirtIdx, nextTop, nextSkirt);
+      const skirtIdx = skirtBase + seg + x;
+      indices.push(topIdx, nextTop, skirtIdx); // winding order flipped for correct normal
     }
-    // Left edge (west) — connect x=0 column
+    // Left edge (west, x=0): top vertices 0, seg+1, 2*(seg+1), ..., seg*(seg+1)
     for (let z = 0; z < seg; z++) {
       const topIdx = z * (seg + 1);
-      const skirtIdx = skirtBase + 2 * seg + z;
       const nextTop = (z + 1) * (seg + 1);
-      const nextSkirt = skirtBase + 2 * seg + z + 1;
+      const skirtIdx = skirtBase + 2 * seg + z;
       indices.push(topIdx, nextTop, skirtIdx);
-      indices.push(skirtIdx, nextTop, nextSkirt);
     }
-    // Right edge (east) — connect x=seg column
+    // Right edge (east, x=seg): top vertices seg, 2*seg+1, ..., seg*(seg+1)+seg
     for (let z = 0; z < seg; z++) {
       const topIdx = z * (seg + 1) + seg;
-      const skirtIdx = skirtBase + 3 * seg + z;
       const nextTop = (z + 1) * (seg + 1) + seg;
-      const nextSkirt = skirtBase + 3 * seg + z + 1;
+      const skirtIdx = skirtBase + 3 * seg + z;
       indices.push(topIdx, skirtIdx, nextTop);
-      indices.push(nextTop, skirtIdx, nextSkirt);
     }
 
     const geometry = new THREE.BufferGeometry();
