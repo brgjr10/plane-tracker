@@ -5,8 +5,8 @@ import { FlightSeed, ROUTES, SEED_FLIGHTS } from '../data/seed-data';
 import { bearing, haversineDistanceNm, interpolatePosition } from '../utils/geo';
 
 /** Cruise profile. Each flight gets a random speed in this range. */
-const MIN_SPEED_KTS = 2000;
-const MAX_SPEED_KTS = 3500;
+const MIN_SPEED_KTS = 420;
+const MAX_SPEED_KTS = 520;
 const CRUISE_ALTITUDE_FT = 35000;
 /** Fractions of the route spent climbing / descending (rest is cruise). */
 const CLIMB_FRACTION = 0.15;
@@ -117,6 +117,9 @@ export class FlightSimulatorService {
       departure: new Date(legStartMs).toISOString(),
       // ETA intentionally deferred for now (Phase 2 scope) — filled in later.
       eta: '',
+      // Simulated aircraft are airborne by definition; the live feed sets this
+      // from OpenSky's on_ground state vector.
+      onGround: false,
     };
   }
 

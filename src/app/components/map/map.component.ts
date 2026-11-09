@@ -622,8 +622,13 @@ export class MapComponent
               }
               this.selectedFlightId.set(plane.flightId);
               this.followActive.set(false);
-              this.routeActive.set(true);
-              this.showRouteFor(plane, true);
+              // Only activate route mode when origin/destination airports are
+              // resolvable. Live OpenSky flights carry empty source/destination
+              // codes, so the route overlay cannot draw for them.
+              if (this.hasRouteData(plane)) {
+                this.routeActive.set(true);
+                this.showRouteFor(plane, true);
+              }
             }),
         });
         marker.setMap(this.map ?? null);
@@ -708,9 +713,19 @@ export class MapComponent
    * and Route are mutually exclusive, so turning follow on clears the Route
    * action's highlight; turning it off removes the path.
    */
+  /** True when both origin and destination airports resolve from the seed map. */
+  private hasRouteData(plane: Aircraft): boolean {
+    return Boolean(AIRPORTS[plane.source] && AIRPORTS[plane.destination]);
+  }
+
   private toggleFollow(): void {
     const plane = this.selectedAircraft();
     if (!plane || !this.map) {
+      return;
+    }
+    if (!this.hasRouteData(plane)) {
+      // Follow mode draws a route path; without origin/destination airports
+      // there is nothing to draw.
       return;
     }
     if (this.followActive()) {
@@ -755,19 +770,23 @@ export class MapComponent
    * toggleFollow) so only one action is ever active.
    */
   private toggleRoute(): void {
+    const plane = this.selectedAircraft();
+    if (!plane || !this.map) {
+      return;
+    }
+    if (!this.hasRouteData(plane)) {
+      // Route mode draws origin→plane→destination; without known airports
+      // there is nothing to draw.
+      return;
+    }
     if (this.routeActive()) {
       this.hideRoute();
       return;
     }
-    const plane = this.selectedAircraft();
-    if (plane) {
-      this.followActive.set(false); // mutual exclusion with the Follow action
-      this.routeActive.set(true);
-      this.showRouteFor(plane, true); // draw the path and fit it into view
-    }
+    this.followActive.set(false); // mutual exclusion with the Follow action
+    this.routeActive.set(true);
+    this.showRouteFor(plane, true); // draw the path and fit it into view
   }
-
-  /** Clear per-flight modes (route + follow) when selection changes or clears. */
   private resetFlightModes(): void {
     this.hideRoute(); // detaches the path and clears both action signals
   }

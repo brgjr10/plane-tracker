@@ -19,7 +19,14 @@ export class LiveFlightService {
   /** True when the WebSocket is connected. */
   readonly connected = signal(false);
 
+  /** Feed error message when the live feed is unavailable (cleared on connect). */
+  readonly feedError = signal<string | null>(null);
+
   private ws?: WebSocket;
+
+  private retryCount = 0;
+  private readonly MAX_RETRIES = 10;
+  private readonly BASE_BACKOFF_MS = 3000;
 
   constructor() {
     this.connect();
@@ -39,7 +46,11 @@ export class LiveFlightService {
     this.ws = new WebSocket(url);
 
     this.ws.onopen = () => {
-      this.zone.run(() => this.connected.set(true));
+      this.zone.run(() => {
+        this.connected.set(true);
+        this.feedError.set(null);
+        this.retryCount = 0;
+      });
       log('[LiveFlightService] connected');
     };
 
@@ -59,12 +70,30 @@ export class LiveFlightService {
       this.zone.run(() => this.connected.set(false));
       log('[LiveFlightService] disconnected; reconnecting in 3s');
       this.ws = undefined;
-      setTimeout(() => this.connect(), 3000);
+      setTimeout(() => this.reconnect(), 3000);
     };
 
     this.ws.onerror = (err) => {
       log('[LiveFlightService] error', err);
     };
+  }
+
+  /** Attempt to reconnect with exponential backoff, capping at MAX_RETRIES.
+   * Sets feedError when retries are exhausted. */
+  private reconnect(): void {
+    if (this.retryCount >= this.MAX_RETRIES) {
+      this.zone.run(() => {
+        this.feedError.set(
+          `Live flight feed unavailable after ${this.MAX_RETRIES} reconnect attempts.`,
+        );
+      });
+      log('[LiveFlightService] max retries reached; giving up');
+      return;
+    }
+    const backoffMs = this.BASE_BACKOFF_MS * Math.pow(2, this.retryCount);
+    this.retryCount++;
+    log(`[LiveFlightService] reconnect attempt ${this.retryCount} in ${backoffMs}ms`);
+    setTimeout(() => this.connect(), backoffMs);
   }
 
   /** Map the backend's Aircraft-shaped dict (which may carry extra fields) onto

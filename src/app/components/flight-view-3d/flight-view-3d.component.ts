@@ -76,13 +76,13 @@ const CHASE_LERP = 0.06;
  * REFERENCE_SPEED_KTS. (The real-tile terrain no longer scrolls by an arbitrary
  * offset — it's anchored to the aircraft's true lat/lon each frame.)
  */
-const REFERENCE_SPEED_KTS = 2000;
+const REFERENCE_SPEED_KTS = 470;
 const CLOUD_SCROLL_UNITS = 8; // parallax layer above the streaming ground
 /** Rotate the cloud flow direction if it sweeps the wrong way (try ±90/180). */
 const FLOW_YAW_OFFSET_DEG = 0;
 
 /**
- * The simulator cruises at 2000–3500 kts (deliberately fast for the 2D map). At
+ * The simulator cruises at 420–520 kts. At
  * real map-tile scale that would thrash the tile grid, so the 3D view samples the
  * simulator through a slowed clock: `sample()` is a pure function of the
  * timestamp we pass it, so scaling elapsed time here slows position/heading/

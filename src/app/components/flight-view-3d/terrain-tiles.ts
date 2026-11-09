@@ -39,8 +39,8 @@ import {
  * rendered as a persistent credit line in the component template.
  */
 
-/** Zoom level: z12 tiles are ~9–10 km on the ground — a 9×9 grid ≈ 85 km. */
-export const TILE_ZOOM = 12;
+/** Zoom level: z13 tiles are ~4–5 km on the ground — a 9×9 grid ≈ 45 km. */
+export const TILE_ZOOM = 13;
 /** Grid radius in tiles from the centre (4 → a 9×9 grid). */
 const GRID_RADIUS = 4;
 /** Vertex subdivision per tile edge (heightmaps are 256px; 128 samples them cleanly). */
