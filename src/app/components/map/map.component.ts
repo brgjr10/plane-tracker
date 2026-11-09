@@ -456,7 +456,9 @@ export class MapComponent
     const clustering = zoom < CLUSTER_MAX_ZOOM && !soloView;
 
     // Filter: hide grounded aircraft when the toggle is on; solo view shows only
-    // the selected flight.
+    // the selected flight. Then cull anything outside the current viewport —
+    // off-screen aircraft shouldn't pay marker DOM costs every sync pass.
+    const bounds = this.map.getBounds();
     const visible = fleet.filter((plane) => {
       if (soloView && plane.flightId !== selectedId) {
         return false;
@@ -464,7 +466,7 @@ export class MapComponent
       if (this.hideGrounded() && plane.onGround) {
         return false;
       }
-      return true;
+      return bounds.contains([plane.latitude, plane.longitude]);
     });
 
     if (clustering) {

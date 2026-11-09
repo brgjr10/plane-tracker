@@ -312,3 +312,29 @@ html.theme-light {
 .aircraft-card__dot {
   color: var(--text-disabled);
 }
+
+/* =====================================================================
+   Cluster marker badge (low zoom).
+   Lives in Leaflet's overlay pane — outside any Angular component's DOM —
+   so these styles must be GLOBAL (component-scoped styles can't reach it).
+   ===================================================================== */
+.cluster-marker {
+  background: #3fb950;
+  border: 2px solid #ffffff;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+  cursor: default;
+
+  &__count {
+    color: #ffffff;
+    font-size: 0.8rem;
+    font-weight: 700;
+    line-height: 1;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+  }
+}
