@@ -4,7 +4,7 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci --legacy-peer-deps
 COPY . .
-RUN npx ng build --configuration production
+RUN npm run build
 
 # Stage 2: backend + serve static frontend
 FROM python:3.12-slim
