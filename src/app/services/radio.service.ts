@@ -1,6 +1,6 @@
 import { inject, Injectable, OnDestroy } from '@angular/core';
 import { cityForAirport } from '../data/seed-data';
-import { FlightSimulatorService } from './flight-simulator.service';
+import { LiveFlightService } from './live-flight.service';
 
 /**
  * Simulated ATC radio chatter for the 3D flight view.
@@ -92,7 +92,7 @@ const BED_OPEN_GAIN = 0.022;
 
 @Injectable({ providedIn: 'root' })
 export class RadioService implements OnDestroy {
-  private readonly simulator = inject(FlightSimulatorService);
+  private readonly liveFlights = inject(LiveFlightService);
 
   private audioCtx: AudioContext | null = null;
   private bedGain: GainNode | null = null;
@@ -252,9 +252,9 @@ export class RadioService implements OnDestroy {
     });
   }
 
-  /** Live phraseology context from the simulator (watched or random flight). */
+  /** Live phraseology context from the live WebSocket feed (watched or random flight). */
   private buildContext(): ChatterContext | null {
-    const fleet = this.simulator.sample(Date.now());
+    const fleet = this.liveFlights.fleet();
     if (fleet.length === 0) {
       return null;
     }

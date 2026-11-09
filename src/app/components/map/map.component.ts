@@ -21,7 +21,7 @@ import {
 } from '../aircraft-info-panel/aircraft-info-panel.component';
 import { Aircraft } from '../../models/aircraft.model';
 import { AIRPORTS, cityForAirport, SEED_FLIGHTS } from '../../data/seed-data';
-import { FlightSimulatorService } from '../../services/flight-simulator.service';
+import { LiveFlightService } from '../../services/live-flight.service';
 import { GoogleMapsLoaderService } from '../../services/google-maps-loader.service';
 import { MapThemeService } from '../../services/map-theme.service';
 import {
@@ -93,7 +93,7 @@ export class MapComponent implements OnInit, OnDestroy {
   private readonly mapsLoader = inject(GoogleMapsLoaderService);
   private readonly cdr = inject(ChangeDetectorRef);
   private readonly mapTheme = inject(MapThemeService);
-  private readonly simulator = inject(FlightSimulatorService);
+  private readonly liveFlights = inject(LiveFlightService);
   private readonly zone = inject(NgZone);
   private readonly router = inject(Router);
 
@@ -143,6 +143,12 @@ export class MapComponent implements OnInit, OnDestroy {
    */
   private readonly clock = toSignal(interval(500), { initialValue: 0 });
 
+  /** Latest live fleet from the WebSocket feed. */
+  readonly liveFleet = this.liveFlights.fleet;
+
+  /** True when the live WebSocket feed is connected. */
+  readonly feedConnected = this.liveFlights.connected;
+
   /** Live data for the selected aircraft, or null when none is selected. */
   readonly selectedAircraft = computed<Aircraft | null>(() => {
     this.clock(); // refresh periodically while the panel is open
@@ -151,9 +157,7 @@ export class MapComponent implements OnInit, OnDestroy {
       return null;
     }
     return (
-      this.simulator
-        .sample(Date.now())
-        .find((plane) => plane.flightId === flightId) ?? null
+      this.liveFleet().find((plane) => plane.flightId === flightId) ?? null
     );
   });
 
@@ -276,12 +280,12 @@ export class MapComponent implements OnInit, OnDestroy {
     map.addListener('click', () => this.zone.run(() => this.clearSelection()));
 
     // Drive the markers from an animation-frame loop, outside Angular so we
-    // don't run change detection ~60×/sec. Each frame we sample the simulator
-    // at the current time and move the marker DOM directly — smooth motion,
+    // don't run change detection ~60×/sec. Each frame we read the live fleet
+    // from the WebSocket feed and move the marker DOM directly — smooth motion,
     // no per-frame CD.
     this.zone.runOutsideAngular(() => {
       const animate = () => {
-        const fleet = this.simulator.sample(Date.now());
+        const fleet = this.liveFleet();
         this.syncAircraftMarkers(fleet);
         this.updateRoute(fleet);
         this.updateFollow(fleet);

@@ -18,7 +18,7 @@ import * as THREE from 'three';
 import { MTLLoader } from 'three/examples/jsm/loaders/MTLLoader.js';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
 import { Aircraft } from '../../models/aircraft.model';
-import { FlightSimulatorService } from '../../services/flight-simulator.service';
+import { LiveFlightService } from '../../services/live-flight.service';
 import { GoogleMapsLoaderService } from '../../services/google-maps-loader.service';
 import { destinationPoint } from '../../utils/geo';
 import { AircraftOverlay, createAircraftOverlay } from './aircraft-overlay';
@@ -94,7 +94,7 @@ type ViewState = 'loading' | 'ready' | 'error';
 export class FlightViewMap3dComponent implements AfterViewInit, OnDestroy {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
-  private readonly simulator = inject(FlightSimulatorService);
+  private readonly liveFlights = inject(LiveFlightService);
   private readonly mapsLoader = inject(GoogleMapsLoaderService);
   private readonly zone = inject(NgZone);
   private readonly host: HTMLElement = inject(ElementRef).nativeElement;
@@ -112,9 +112,8 @@ export class FlightViewMap3dComponent implements AfterViewInit, OnDestroy {
       return null;
     }
     return (
-      this.simulator
-        .sample(this.simClock())
-        .find((plane) => plane.flightId === this.flightId) ?? null
+      this.liveFlights.fleet().find((plane) => plane.flightId === this.flightId) ??
+      null
     );
   });
 
@@ -254,9 +253,7 @@ export class FlightViewMap3dComponent implements AfterViewInit, OnDestroy {
     if (!this.flightId) {
       return undefined;
     }
-    return this.simulator
-      .sample(this.simClock())
-      .find((p) => p.flightId === this.flightId);
+    return this.liveFlights.fleet().find((p) => p.flightId === this.flightId);
   }
 
   /**

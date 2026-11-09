@@ -20,7 +20,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { MTLLoader } from 'three/examples/jsm/loaders/MTLLoader.js';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
 import { Aircraft } from '../../models/aircraft.model';
-import { FlightSimulatorService } from '../../services/flight-simulator.service';
+import { LiveFlightService } from '../../services/live-flight.service';
 import { MapTheme, MapThemeService } from '../../services/map-theme.service';
 import { Clouds, createClouds } from './clouds';
 import { createStars, Stars } from './stars';
@@ -125,7 +125,7 @@ type ModelState = 'loading' | 'ready' | 'error';
 export class FlightView3dComponent implements AfterViewInit, OnDestroy {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
-  private readonly simulator = inject(FlightSimulatorService);
+  private readonly liveFlights = inject(LiveFlightService);
   private readonly mapTheme = inject(MapThemeService);
   private readonly radio = inject(RadioService);
   private readonly zone = inject(NgZone);
@@ -146,15 +146,15 @@ export class FlightView3dComponent implements AfterViewInit, OnDestroy {
       return null;
     }
     return (
-      this.simulator
-        .sample(this.simClock())
-        .find((plane) => plane.flightId === this.flightId) ?? null
+      this.liveFlights.fleet().find((plane) => plane.flightId === this.flightId) ??
+      null
     );
   });
 
   /**
    * Slowed simulator timestamp for the 3D view: scales elapsed wall time so real
-   * map tiles don't thrash. The 2D map keeps sampling with the real clock.
+   * map tiles don't thrash. Kept for visual smoothing; positions come from the
+   * live WebSocket feed, not the client-side simulator.
    */
   private simClock(): number {
     return this.viewT0 + (Date.now() - this.viewT0) * VISUAL_TIME_SCALE;
@@ -352,8 +352,8 @@ export class FlightView3dComponent implements AfterViewInit, OnDestroy {
       const dt = Math.min(this.threeClock.getDelta(), 0.1);
       let speedKts = 0;
       if (this.model && this.flightId) {
-        const plane = this.simulator
-          .sample(this.simClock())
+        const plane = this.liveFlights
+          .fleet()
           .find((p) => p.flightId === this.flightId);
         if (plane) {
           // Heading is compass degrees (CW from north); Three yaw is CCW.
