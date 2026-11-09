@@ -621,6 +621,9 @@ export class MapComponent
                 this.resetFlightModes();
               }
               this.selectedFlightId.set(plane.flightId);
+              this.followActive.set(false);
+              this.routeActive.set(true);
+              this.showRouteFor(plane, true);
             }),
         });
         marker.setMap(this.map ?? null);

@@ -298,7 +298,7 @@ export class FlightView3dComponent implements AfterViewInit, OnDestroy {
     this.renderer.setSize(width, height, false);
 
     this.scene = new THREE.Scene();
-    this.scene.fog = new THREE.Fog(0x000000, 40, 160);
+    this.scene.fog = new THREE.Fog(0x000000, 100, 500);
 
     this.camera = new THREE.PerspectiveCamera(55, width / height, 0.1, 2000);
     // Start behind + above the aircraft (third-person); the chase loop keeps it there.
