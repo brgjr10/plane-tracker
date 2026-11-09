@@ -22,6 +22,13 @@ MAX_POLL_INTERVAL_SEC = 120.0
 OPENSKY_CLIENT_ID = os.getenv("OPENSKY_CLIENT_ID", "")
 OPENSKY_CLIENT_SECRET = os.getenv("OPENSKY_CLIENT_SECRET", "")
 
+# Fallback ADS-B providers (readsb-style). OpenSky is tried first; on failure/rate-limit
+# we fall back in order. airplanes.live requires explicit opt-in because its public API
+# may require coordination/credentials; set AIRPLANES_LIVE_URL to enable it.
+ADSB_LOL_URL = os.getenv("ADSB_LOL_URL", "https://api.adsb.lol/v2/lat/0/lon/0/dist/25000")
+ADSB_FI_URL = os.getenv("ADSB_FI_URL", "https://opendata.adsb.fi/api/v2/lat/0/lon/0/dist/25000")
+AIRPLANES_LIVE_URL = os.getenv("AIRPLANES_LIVE_URL", "").strip()
+
 # OAuth2 access token cache (Bearer token expires after 30 minutes)
 _token: Optional[str] = None
 _token_expires_at: float = 0.0
@@ -52,7 +59,7 @@ async def get_access_token(client: httpx.AsyncClient) -> Optional[str]:
         log.info("Obtained OpenSky OAuth2 access token (expires in ~%ds)", data.get("expires_in", 1800))
         return _token
     except Exception as exc:
-        log.exception("Failed to obtain OpenSky access token: %s", exc)
+        log.warning("Failed to obtain OpenSky access token: %s", exc)
         return None
 
 app = FastAPI(title="Plane Tracker Live Feed")
@@ -60,7 +67,7 @@ app = FastAPI(title="Plane Tracker Live Feed")
 # Connected WebSocket clients
 clients: set[WebSocket] = set()
 
-# Latest fleet snapshot keyed by icao24
+# Latest fleet snapshot keyed by icao24/flight id
 fleet: Dict[str, dict] = {}
 
 
@@ -103,35 +110,139 @@ def opensky_to_aircraft(state: list) -> Optional[dict]:
     }
 
 
-async def poll_opensky():
-    """Background task: poll OpenSky via OAuth2 Bearer token and broadcast to WebSocket clients.
+def _num(value, default=0):
+    try:
+        if value is None or value == "" or value == "ground":
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
 
-    Uses OPENSKY_CLIENT_ID / OPENSKY_CLIENT_SECRET env vars to obtain an access token
-    via the client credentials flow. On any failure the poller backs off exponentially
-    up to MAX_POLL_INTERVAL_SEC and resets to BASE_POLL_INTERVAL_SEC on success.
-    """
-    log.info("OpenSky poller started")
+
+def readsb_to_aircraft(ac: dict) -> Optional[dict]:
+    """Map a readsb-style ADS-B record (adsb.lol/adsb.fi/airplanes.live-like) to Aircraft."""
+    lat = ac.get("lat")
+    lon = ac.get("lon")
+    if lat is None or lon is None:
+        return None
+    hex_id = str(ac.get("hex") or ac.get("icao") or ac.get("icao24") or "").strip().lower()
+    flight = str(ac.get("flight") or ac.get("callsign") or "").strip()
+    reg = str(ac.get("r") or ac.get("reg") or "").strip()
+    flight_id = flight or reg or hex_id
+    if not flight_id:
+        return None
+    alt_baro = ac.get("alt_baro")
+    on_ground = bool(ac.get("on_ground") or ac.get("onGround") or alt_baro == "ground")
+    altitude_ft = 0 if on_ground else round(_num(alt_baro if alt_baro != "ground" else None, _num(ac.get("alt_geom"))))
+    heading = round(_num(ac.get("track"), _num(ac.get("true_heading"), _num(ac.get("mag_heading"))))) % 360
+    speed_kts = round(_num(ac.get("gs"), _num(ac.get("tas"), _num(ac.get("ias")))))
+    aircraft_type = str(ac.get("t") or ac.get("type") or ac.get("desc") or "").strip()
+    return {
+        "flightId": flight_id,
+        "icao24": hex_id or flight_id,
+        "airline": "",
+        "aircraft": aircraft_type,
+        "source": "",
+        "destination": "",
+        "latitude": round(float(lat), 6),
+        "longitude": round(float(lon), 6),
+        "altitude": max(0, int(altitude_ft)),
+        "heading": int(heading),
+        "speed": max(0, int(speed_kts)),
+        "progress": 0.0,
+        "departure": "",
+        "eta": "",
+        "onGround": on_ground,
+    }
+
+
+async def fetch_opensky(client: httpx.AsyncClient) -> Optional[Dict[str, dict]]:
+    token = await get_access_token(client)
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    resp = await client.get(OPENSKY_URL, headers=headers)
+    resp.raise_for_status()
+    states = resp.json().get("states", []) or []
+    fleet_out: Dict[str, dict] = {}
+    for state in states:
+        ac = opensky_to_aircraft(state)
+        if ac:
+            fleet_out[ac["icao24"]] = ac
+    return fleet_out
+
+
+async def fetch_readsb(client: httpx.AsyncClient, url: str, label: str) -> Optional[Dict[str, dict]]:
+    if not url:
+        return None
+    resp = await client.get(url)
+    resp.raise_for_status()
+    data = resp.json()
+    if isinstance(data, dict) and data.get("error"):
+        log.warning("%s returned error: %s", label, data.get("error"))
+        return None
+    records = []
+    if isinstance(data, list):
+        records = data
+    elif isinstance(data, dict):
+        for key in ("ac", "aircraft", "states"):
+            val = data.get(key)
+            if isinstance(val, list):
+                records = val
+                break
+    fleet_out: Dict[str, dict] = {}
+    for rec in records:
+        if isinstance(rec, dict):
+            ac = readsb_to_aircraft(rec)
+            if ac:
+                fleet_out[ac["icao24"]] = ac
+    if not fleet_out:
+        log.warning("%s returned no usable aircraft", label)
+        return None
+    return fleet_out
+
+
+async def poll_flights():
+    """Poll OpenSky first, then configured ADS-B fallbacks, and broadcast snapshots."""
+    log.info(
+        "Flight poller started (primary=OpenSky, fallbacks=adsb.lol,adsb.fi%s)",
+        ",airplanes.live(opt-in)" if AIRPLANES_LIVE_URL else "",
+    )
     backoff = BASE_POLL_INTERVAL_SEC
-    async with httpx.AsyncClient(timeout=15.0) as client:
+    sources = [
+        ("OpenSky", lambda c: fetch_opensky(c)),
+        ("adsb.lol", lambda c: fetch_readsb(c, ADSB_LOL_URL, "adsb.lol")),
+        ("adsb.fi", lambda c: fetch_readsb(c, ADSB_FI_URL, "adsb.fi")),
+    ]
+    if AIRPLANES_LIVE_URL:
+        sources.append(("airplanes.live", lambda c: fetch_readsb(c, AIRPLANES_LIVE_URL, "airplanes.live")))
+
+    async with httpx.AsyncClient(timeout=20.0, headers={"Accept": "application/json"}) as client:
         while True:
-            try:
-                token = await get_access_token(client)
-                headers = {"Authorization": f"Bearer {token}"} if token else {}
-                resp = await client.get(OPENSKY_URL, headers=headers)
-                resp.raise_for_status()
-                data = resp.json()
-                states = data.get("states", []) or []
-                new_fleet: Dict[str, dict] = {}
-                for state in states:
-                    ac = opensky_to_aircraft(state)
-                    if ac:
-                        new_fleet[ac["icao24"]] = ac
+            new_fleet: Optional[Dict[str, dict]] = None
+            used_source = None
+            errors = []
+            for name, fetcher in sources:
+                try:
+                    result = await fetcher(client)
+                    if result:
+                        new_fleet = result
+                        used_source = name
+                        break
+                    errors.append(f"{name}: empty")
+                except Exception as exc:
+                    errors.append(f"{name}: {exc}")
+                    if name == "OpenSky":
+                        log.warning("OpenSky fetch failed, trying fallbacks: %s", exc)
+                    else:
+                        log.warning("%s fetch failed: %s", name, exc)
+
+            if new_fleet and used_source:
                 fleet.clear()
                 fleet.update(new_fleet)
                 payload = {
                     "type": "fleet",
                     "ts": datetime.now(tz=timezone.utc).isoformat(),
                     "count": len(fleet),
+                    "source": used_source,
                     "aircraft": list(fleet.values()),
                 }
                 message = json.dumps(payload)
@@ -144,16 +255,17 @@ async def poll_opensky():
                 for ws in dead:
                     clients.discard(ws)
                 backoff = BASE_POLL_INTERVAL_SEC
-                log.info("Polled OpenSky: %d aircraft, %d clients", len(fleet), len(clients))
-            except Exception as exc:
-                log.exception("OpenSky poll failed: %s", exc)
-                backoff = min(backoff * 2, MAX_POLL_INTERVAL_SEC)
+                log.info("Polled %s: %d aircraft, %d clients", used_source, len(fleet), len(clients))
+            else:
+                log.warning("All flight sources failed: %s", "; ".join(errors) or "unknown")
+                backoff = min(max(backoff * 2, BASE_POLL_INTERVAL_SEC), MAX_POLL_INTERVAL_SEC)
+
             await asyncio.sleep(backoff)
 
 
 @app.on_event("startup")
 async def startup():
-    asyncio.create_task(poll_opensky())
+    asyncio.create_task(poll_flights())
 
 
 @app.websocket("/ws/flights")
@@ -191,6 +303,7 @@ async def flights_rest():
 
 # Serve the built Angular frontend
 app.mount("/", StaticFiles(directory="/app/dist/plane-tracker/browser", html=True), name="static")
+
 
 @app.get("/{full_path:path}")
 async def spa(full_path: str):
