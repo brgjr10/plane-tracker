@@ -15,9 +15,12 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger("planetracker")
 
 OPENSKY_URL = "https://opensky-network.org/api/states/all"
+OPENSKY_FLIGHT_URL = "https://opensky-network.org/api/flights/aircraft"
 OPENSKY_TOKEN_URL = "https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token"
 BASE_POLL_INTERVAL_SEC = 10.0
 MAX_POLL_INTERVAL_SEC = 120.0
+ROUTE_ENRICH_INTERVAL_SEC = 300.0  # 5 min
+ROUTE_CACHE_TTL_SEC = 86400.0  # 24h
 
 OPENSKY_CLIENT_ID = os.getenv("OPENSKY_CLIENT_ID", "")
 OPENSKY_CLIENT_SECRET = os.getenv("OPENSKY_CLIENT_SECRET", "")
@@ -32,6 +35,9 @@ AIRPLANES_LIVE_URL = os.getenv("AIRPLANES_LIVE_URL", "").strip()
 # OAuth2 access token cache (Bearer token expires after 30 minutes)
 _token: Optional[str] = None
 _token_expires_at: float = 0.0
+
+# Route cache: icao24 -> {"origin": "KJFK", "destination": "KLAX", "cached_at": 1234567890.0}
+_route_cache: Dict[str, dict] = {}
 
 
 async def get_access_token(client: httpx.AsyncClient) -> Optional[str]:
@@ -61,6 +67,56 @@ async def get_access_token(client: httpx.AsyncClient) -> Optional[str]:
     except Exception as exc:
         log.warning("Failed to obtain OpenSky access token: %s", exc)
         return None
+
+
+async def enrich_routes(client: httpx.AsyncClient, fleet: Dict[str, dict]) -> None:
+    """Fetch origin/destination from OpenSky flight metadata for aircraft with callsigns."""
+    token = await get_access_token(client)
+    if not token:
+        return
+    headers = {"Authorization": f"Bearer {token}"}
+    now = time.time()
+    # Candidates: have callsign (not just hex), missing route, not cached or expired
+    candidates = [
+        (icao24, ac) for icao24, ac in fleet.items()
+        if ac.get("callsign") and not ac.get("source") and not ac.get("destination")
+        and (icao24 not in _route_cache or now - _route_cache[icao24].get("cached_at", 0) > ROUTE_CACHE_TTL_SEC)
+    ]
+    if not candidates:
+        return
+    log.info("Enriching routes for %d aircraft", len(candidates))
+    for icao24, ac in candidates:
+        callsign = ac["callsign"].strip()
+        if not callsign:
+            continue
+        try:
+            # OpenSky flight metadata by aircraft (icao24)
+            resp = await client.get(
+                f"{OPENSKY_FLIGHT_URL}/{icao24}",
+                headers=headers,
+                timeout=10.0,
+            )
+            if resp.status_code == 404:
+                _route_cache[icao24] = {"origin": "", "destination": "", "cached_at": now}
+                continue
+            resp.raise_for_status()
+            flights = resp.json()
+            if flights:
+                # Take the most recent flight (last in list)
+                latest = flights[-1]
+                origin = latest.get("estDepartureAirport", "") or latest.get("departureAirport", "")
+                destination = latest.get("estArrivalAirport", "") or latest.get("arrivalAirport", "")
+                if origin or destination:
+                    _route_cache[icao24] = {"origin": origin, "destination": destination, "cached_at": now}
+                    ac["source"] = origin
+                    ac["destination"] = destination
+                    log.debug("Enriched %s (%s): %s -> %s", ac["flightId"], icao24, origin, destination)
+                else:
+                    _route_cache[icao24] = {"origin": "", "destination": "", "cached_at": now}
+        except Exception as exc:
+            log.warning("Route enrichment failed for %s: %s", icao24, exc)
+            # Don't cache failures; retry next cycle
+
 
 app = FastAPI(title="Plane Tracker Live Feed")
 
@@ -238,6 +294,9 @@ async def poll_flights():
             if new_fleet and used_source:
                 fleet.clear()
                 fleet.update(new_fleet)
+                # Enrich with route info (origin/destination) from OpenSky flight metadata
+                if used_source == "OpenSky":
+                    await enrich_routes(client, fleet)
                 payload = {
                     "type": "fleet",
                     "ts": datetime.now(tz=timezone.utc).isoformat(),
