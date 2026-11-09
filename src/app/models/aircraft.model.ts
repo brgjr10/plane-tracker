@@ -38,4 +38,6 @@ export interface Aircraft {
   departure: string;
   /** Estimated time of arrival (ISO 8601 timestamp). */
   eta: string;
+  /** True when the aircraft is on the ground (not airborne). */
+  onGround: boolean;
 }

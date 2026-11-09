@@ -50,6 +50,17 @@ const MARKER_MAX_ALTITUDE_FT = 35000;
 const MARKER_ROTATION_OFFSET_DEG = 0;
 
 /**
+ * Below this zoom, aircraft markers are clustered into grid cells so the map
+ * doesn't paint thousands of overlapping SVG badges at once. At/above this zoom
+ * every aircraft gets its own marker.
+ */
+const CLUSTER_MAX_ZOOM = 6;
+/** Grid cell size (px at current zoom) used to bucket nearby aircraft into one cluster. */
+const CLUSTER_CELL_SIZE_PX = 90;
+/** Cluster marker radius (px). */
+const CLUSTER_MARKER_SIZE_PX = 40;
+
+/**
  * How often follow mode re-centres the map on the plane. The animation loop runs
  * ~60×/sec; panning every frame drifts the map continuously, so instead we step
  * to the plane's latest position on this cadence.
@@ -120,6 +131,19 @@ export class MapComponent
   private readonly MARKER_SYNC_INTERVAL_MS = 200;
   /** Last applied style bucket ("theme:labelsVisible") to skip redundant restyles. */
   private lastStyleKey = '';
+
+  /** True when grounded aircraft are hidden from the map. */
+  readonly hideGrounded = signal(false);
+
+  /** Clustering mode: below CLUSTER_MAX_ZOOM we bucket nearby aircraft into grid cells. */
+  private readonly clustering = signal(false);
+
+  /** Layer group holding cluster markers (only populated while clustering). */
+  private readonly clusterLayer = L.layerGroup();
+  /** Cluster markers keyed by grid cell key (e.g. "12:34"). */
+  private readonly clusterMarkers = new Map<string, L.Marker>();
+  /** FlightIds currently absorbed into a cluster (their individual markers are detached). */
+  private readonly clusteredFlightIds = new Set<string>();
 
   /**
    * Route overlays for the selected flight (toggled by the panel's Route
@@ -254,8 +278,14 @@ export class MapComponent
       }
       this.mapReady = true;
 
-      // Re-apply when zoom crosses the label threshold.
-      this.map.on('zoomend', () => this.applyMapStyle());
+      // Add the cluster layer (empty until clustering kicks in at low zoom).
+      this.clusterLayer.addTo(this.map);
+
+      // Re-apply when zoom crosses the label threshold or the clustering boundary.
+      this.map.on('zoomend', () => {
+        this.applyMapStyle();
+        this.evaluateClustering();
+      });
 
       // Sync URL after every pan/zoom settles. `moveend` fires once when the
       // user stops, not per-frame during a drag — no extra debounce needed.
@@ -277,12 +307,14 @@ export class MapComponent
             this.lastMarkerSyncMs = now;
           }
           // Route and follow updates are cheap (one polyline each), keep them
-          // every frame for smooth panning.
+          // every frame for smooth panning. Also re-evaluate clustering each
+          // frame since route/follow state can flip clustering on/off.
           if (this.routeActive() || this.followActive()) {
             const fleet = this.liveFleet();
             this.updateRoute(fleet);
             this.updateFollow(fleet);
           }
+          this.evaluateClustering();
           this.animationFrameId = requestAnimationFrame(animate);
         };
         this.animationFrameId = requestAnimationFrame(animate);
@@ -385,9 +417,32 @@ export class MapComponent
   }
 
   /**
+   * Decide whether to cluster based on the current zoom, and re-sync markers
+   * when the clustering mode flips. Called from the animation loop's route/follow
+   * path and from the map's zoomend event so the view updates as soon as the
+   * user zooms past the clustering boundary.
+   */
+  private evaluateClustering(): void {
+    if (!this.map) {
+      return;
+    }
+    const zoom = this.map.getZoom() ?? 0;
+    const wantClustering = zoom < CLUSTER_MAX_ZOOM && !this.routeActive() && !this.followActive();
+    if (wantClustering === this.clustering()) {
+      return;
+    }
+    this.clustering.set(wantClustering);
+    // Re-sync on next animation frame so cluster markers appear/disappear.
+  }
+
+  /**
    * Reconcile the on-map markers with the current fleet: update existing
    * aircraft, create markers for new ones, and remove markers for any that are
    * gone. Keyed by flightId so each plane keeps its own marker across ticks.
+   *
+   * When clustering is active (low zoom, no route/follow), nearby aircraft are
+   * bucketed into grid cells and shown as a single cluster marker instead of
+   * individual badges — far cheaper than painting 10k SVG markers at once.
    */
   private syncAircraftMarkers(fleet: Aircraft[]): void {
     if (!this.map) {
@@ -395,64 +450,182 @@ export class MapComponent
     }
 
     const selectedId = this.selectedFlightId();
-    // While the route path is shown for a flight — by either the Route action or
-    // Follow mode — we focus on just that flight: every other aircraft marker is
-    // hidden so the route reads clearly.
     const soloView =
       (this.routeActive() || this.followActive()) && selectedId !== null;
-    const present = new Set<string>();
-    for (const plane of fleet) {
+    const zoom = this.map.getZoom() ?? 0;
+    const clustering = zoom < CLUSTER_MAX_ZOOM && !soloView;
+
+    // Filter: hide grounded aircraft when the toggle is on; solo view shows only
+    // the selected flight.
+    const visible = fleet.filter((plane) => {
       if (soloView && plane.flightId !== selectedId) {
-        // Hidden flight — skip it so it isn't added to `present`; any existing
-        // marker for it is detached in the cleanup pass below.
-        continue;
+        return false;
       }
+      if (this.hideGrounded() && plane.onGround) {
+        return false;
+      }
+      return true;
+    });
+
+    if (clustering) {
+      this.syncClusters(visible, zoom);
+      // Detach every individual marker while clustered.
+      for (const marker of this.markers.values()) {
+        marker.setMap(null);
+      }
+      this.clusteredFlightIds.clear();
+      for (const plane of visible) {
+        this.clusteredFlightIds.add(plane.flightId);
+      }
+    } else {
+      // Not clustering: remove all cluster markers, show individual markers.
+      for (const cm of this.clusterMarkers.values()) {
+        this.clusterLayer.removeLayer(cm);
+      }
+      this.clusterMarkers.clear();
+      this.clusterLayer.clearLayers();
+      this.syncIndividualMarkers(visible);
+    }
+
+    // Drop markers for flights no longer visible (kept in the map for reuse).
+    for (const [flightId, marker] of this.markers) {
+      if (!visible.some((p) => p.flightId === flightId)) {
+        marker.setMap(null);
+        this.markers.delete(flightId);
+      }
+    }
+  }
+
+  /**
+   * Build cluster markers from the visible fleet using a fixed grid over the
+   * current viewport. Cells with one aircraft fall through to individual
+   * markers (handled by the caller); cells with many get one cluster marker
+   * showing the count.
+   */
+  private syncClusters(visible: Aircraft[], zoom: number): void {
+    const cellSize = CLUSTER_CELL_SIZE_PX / Math.pow(2, zoom);
+    const cells = new Map<string, { planes: Aircraft[]; center: L.LatLngLiteral }>();
+
+    for (const plane of visible) {
+      const point = this.map!.latLngToLayerPoint([
+        plane.latitude,
+        plane.longitude,
+      ]);
+      const gx = Math.floor(point.x / cellSize);
+      const gy = Math.floor(point.y / cellSize);
+      const key = `${gx}:${gy}`;
+      let entry = cells.get(key);
+      if (!entry) {
+        entry = { planes: [], center: { lat: plane.latitude, lng: plane.longitude } };
+        cells.set(key, entry);
+      }
+      entry.planes.push(plane);
+      // Running average for the cluster centre.
+      entry.center.lat =
+        (entry.center.lat * (entry.planes.length - 1) + plane.latitude) /
+        entry.planes.length;
+      entry.center.lng =
+        (entry.center.lng * (entry.planes.length - 1) + plane.longitude) /
+        entry.planes.length;
+    }
+
+    const seen = new Set<string>();
+    for (const [key, entry] of cells) {
+      seen.add(key);
+      let marker = this.clusterMarkers.get(key);
+      if (!marker) {
+        marker = this.createClusterMarker(entry.center, entry.planes.length);
+        marker.addTo(this.clusterLayer);
+        this.clusterMarkers.set(key, marker);
+      } else {
+        marker.setLatLng(entry.center as L.LatLngExpression);
+        this.updateClusterMarkerCount(marker, entry.planes.length);
+      }
+    }
+
+    // Remove cluster markers for cells that are now empty.
+    for (const [key, cm] of this.clusterMarkers) {
+      if (!seen.has(key)) {
+        this.clusterLayer.removeLayer(cm);
+        this.clusterMarkers.delete(key);
+      }
+    }
+  }
+
+  /** Create a cluster marker at a given position showing the aircraft count. */
+  private createClusterMarker(
+    position: L.LatLngLiteral,
+    count: number,
+  ): L.Marker {
+    const icon = L.divIcon({
+      className: 'cluster-marker',
+      html: `<div class="cluster-marker__count">${count}</div>`,
+      iconSize: [CLUSTER_MARKER_SIZE_PX, CLUSTER_MARKER_SIZE_PX],
+      iconAnchor: [
+        CLUSTER_MARKER_SIZE_PX / 2,
+        CLUSTER_MARKER_SIZE_PX / 2,
+      ],
+    }) as unknown as L.DivIcon;
+    return L.marker(position as L.LatLngExpression, {
+      icon,
+      interactive: false,
+      zIndexOffset: 1000, // draw above individual aircraft markers
+    });
+  }
+
+  /** Update the count shown on an existing cluster marker. */
+  private updateClusterMarkerCount(marker: L.Marker, count: number): void {
+    const el = marker.getElement();
+    if (!el) {
+      return;
+    }
+    const countEl = el.querySelector('.cluster-marker__count');
+    if (countEl) {
+      countEl.textContent = String(count);
+    }
+  }
+
+  /**
+   * Sync individual aircraft markers (create/update/setSelected) for the given
+   * fleet slice. Used when not clustering; callers pass the already-filtered
+   * visible aircraft.
+   */
+  private syncIndividualMarkers(visible: Aircraft[]): void {
+    const selectedId = this.selectedFlightId();
+    const present = new Set<string>();
+    for (const plane of visible) {
       present.add(plane.flightId);
       const position: L.LatLngExpression = [
         plane.latitude,
         plane.longitude,
       ];
-      // Live values that change each tick and drive the hover card.
       const stats: AircraftLiveStats = {
         altitudeFt: plane.altitude,
         speedKts: plane.speed,
         progress: plane.progress,
       };
-      // Marker grows with altitude, shrinks near the ground.
       const sizePx = markerSizeForAltitude(plane.altitude);
 
       let marker = this.markers.get(plane.flightId);
       if (!marker) {
-        const flightId = plane.flightId;
         marker = createAircraftMarker(position, plane.heading, {
           iconUrl: 'markers/flight.svg',
           sizePx,
           rotationOffsetDeg: MARKER_ROTATION_OFFSET_DEG,
           card: this.cardInfoFor(plane),
-          // Runs outside Angular (rAF loop), so re-enter the zone to update state.
           onClick: () =>
             this.zone.run(() => {
-              // Switching flights drops the previous flight's route/follow modes.
-              if (this.selectedFlightId() !== flightId) {
+              if (this.selectedFlightId() !== plane.flightId) {
                 this.resetFlightModes();
               }
-              this.selectedFlightId.set(flightId);
+              this.selectedFlightId.set(plane.flightId);
             }),
         });
-        marker.setMap(this.map);
-        this.markers.set(flightId, marker);
+        marker.setMap(this.map ?? null);
+        this.markers.set(plane.flightId, marker);
       }
       marker.update(position, plane.heading, stats, sizePx);
-      // Highlight the selected aircraft red (matches the panel that describes it).
       marker.setSelected(plane.flightId === selectedId);
-    }
-
-    // Drop markers for flights no longer in the fleet.
-    for (const [flightId, marker] of this.markers) {
-      if (!present.has(flightId)) {
-        marker.setMap(null);
-        this.markers.delete(flightId);
-      }
     }
   }
 
@@ -764,6 +937,11 @@ export class MapComponent
   clearSelection(): void {
     this.resetFlightModes();
     this.selectedFlightId.set(null);
+  }
+
+  /** Toggle hiding grounded (on_ground) aircraft from the map. */
+  toggleHideGrounded(): void {
+    this.hideGrounded.set(!this.hideGrounded());
   }
 
   ngOnInit(): void {}

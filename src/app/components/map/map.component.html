@@ -3,6 +3,17 @@
        ngAfterViewInit; Leaflet initialises on it once mapReady is true. -->
   <div #mapContainer class="map__canvas"></div>
 
+  <!-- Toggle: hide grounded (on_ground) aircraft. -->
+  <button
+    class="map__toggle map__toggle--hide-grounded"
+    [attr.aria-pressed]="hideGrounded()"
+    [class.map__toggle--active]="hideGrounded()"
+    (click)="toggleHideGrounded()"
+    title="Hide grounded aircraft"
+  >
+    <span class="map__toggle__label">{{ hideGrounded() ? 'Show grounded' : 'Hide grounded' }}</span>
+  </button>
+
   @if (!mapReady) {
     <div class="map__status" role="status" [class.map__status--error]="loadError">
       @if (loadError) {

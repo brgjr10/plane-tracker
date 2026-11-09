@@ -85,6 +85,7 @@ export class LiveFlightService {
       progress: Number(src['progress'] ?? 0),
       departure: String(src['departure'] ?? ''),
       eta: String(src['eta'] ?? ''),
+      onGround: Boolean(src['onGround'] ?? false),
     };
   }
 }
