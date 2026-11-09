@@ -46,6 +46,9 @@ Thumbs.db
 # environment.ts and environment.prod.ts are committed as placeholders so the
 # Angular build works from a fresh clone; add your real Google Maps API key
 # locally in environment.ts (do not commit it with a real key).
+.env
+.env.*
+!.env.example
 
 # CLAUDE files
 CLAUDE.*
