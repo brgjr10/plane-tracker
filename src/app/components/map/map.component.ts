@@ -114,6 +114,10 @@ export class MapComponent
   /** Handle for the animation loop so we can cancel it on destroy. */
   private animationFrameId?: number;
 
+  /** Last time (performance.now()) aircraft markers were synced to the fleet. Throttled to ~5fps since OpenSky only pushes new positions every ~10s — no need to touch 10k markers' DOM at 60fps. */
+  private lastMarkerSyncMs = 0;
+  /** Minimum ms between marker sync passes in the animation loop. */
+  private readonly MARKER_SYNC_INTERVAL_MS = 200;
   /** Last applied style bucket ("theme:labelsVisible") to skip redundant restyles. */
   private lastStyleKey = '';
 
@@ -266,10 +270,19 @@ export class MapComponent
       // no per-frame CD.
       this.zone.runOutsideAngular(() => {
         const animate = () => {
-          const fleet = this.liveFleet();
-          this.syncAircraftMarkers(fleet);
-          this.updateRoute(fleet);
-          this.updateFollow(fleet);
+          const now = performance.now();
+          if (now - this.lastMarkerSyncMs >= this.MARKER_SYNC_INTERVAL_MS) {
+            const fleet = this.liveFleet();
+            this.syncAircraftMarkers(fleet);
+            this.lastMarkerSyncMs = now;
+          }
+          // Route and follow updates are cheap (one polyline each), keep them
+          // every frame for smooth panning.
+          if (this.routeActive() || this.followActive()) {
+            const fleet = this.liveFleet();
+            this.updateRoute(fleet);
+            this.updateFollow(fleet);
+          }
           this.animationFrameId = requestAnimationFrame(animate);
         };
         this.animationFrameId = requestAnimationFrame(animate);
