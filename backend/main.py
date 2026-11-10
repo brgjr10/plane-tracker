@@ -209,6 +209,7 @@ def readsb_to_aircraft(ac: dict) -> Optional[dict]:
         "departure": "",
         "eta": "",
         "onGround": on_ground,
+        "callsign": flight,  # <-- include callsign for route enrichment
     }
 
 
@@ -272,6 +273,8 @@ async def poll_flights():
         sources.append(("airplanes.live", lambda c: fetch_readsb(c, AIRPLANES_LIVE_URL, "airplanes.live")))
 
     async with httpx.AsyncClient(timeout=20.0, headers={"Accept": "application/json"}) as client:
+        # Initial delay to respect poll interval and avoid immediate rate-limit
+        await asyncio.sleep(BASE_POLL_INTERVAL_SEC)
         while True:
             new_fleet: Optional[Dict[str, dict]] = None
             used_source = None
