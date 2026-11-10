@@ -301,16 +301,16 @@ export class FlightView3dComponent implements AfterViewInit, OnDestroy {
       antialias: true,
       powerPreference: 'high-performance',
     });
-    this.renderer.setPixelRatio(window.devicePixelRatio);
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(width, height, false);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.0;
 
     this.scene = new THREE.Scene();
-    this.scene.fog = new THREE.Fog(0x000000, 400, 1800);
+    this.scene.fog = new THREE.Fog(0x000000, 300, 1400);
 
-    this.camera = new THREE.PerspectiveCamera(55, width / height, 0.1, 5000);
+    this.camera = new THREE.PerspectiveCamera(55, width / height, 0.1, 4000);
     // Start behind + above the aircraft (third-person); the chase loop keeps it there.
     this.camera.position.set(0, CHASE_HEIGHT, -CHASE_DISTANCE);
 

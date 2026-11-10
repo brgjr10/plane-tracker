@@ -42,9 +42,9 @@ import {
 /** Zoom level for imagery/elevation tiles (higher = sharper). */
 export const TILE_ZOOM = 15;
 /** Grid radius in tiles from the centre (8 → a 17×17 grid). */
-const GRID_RADIUS = 16;
-/** Vertex subdivision per tile edge (heightmaps are 256px; 128 samples them cleanly). */
-const TILE_SEGMENTS = 128;
+const GRID_RADIUS = 8;
+/** Vertex subdivision per tile edge (heightmaps are 256px; 64 balances detail/perf). */
+const TILE_SEGMENTS = 64;
 /** World units per tile edge. */
 const TILE_UNITS = 80;
 /** Height relief multiplier over the true horizontal scale (drama vs. realism knob). */
@@ -150,15 +150,13 @@ function patchMaterial(
       `
       uniform sampler2D uHeightMap;
       uniform float uElevScale;
-      varying vec3 vTileNormal;
+      varying vec3 vWorldPos;
 
       // Decode Terrarium RGB (raw 0..1 bytes) → elevation in metres.
-      // Clamp to half-texel inset so edge vertices/normal taps don't sample
-      // outside the tile (ClampToEdge + independent tile meshes can create
-      // visible seams/"rips" at tile boundaries).
+      // Sample directly; texture uses ClampToEdgeWrapping so edge taps clamp
+      // to the tile's edge texel, matching adjacent tiles at boundaries.
       float sampleElevM(vec2 uvh) {
-        float inset = 0.5 / ${HEIGHT_PX.toFixed(1)};
-        vec2 uv = clamp(uvh, vec2(inset), vec2(1.0 - inset));
+        vec2 uv = clamp(uvh, vec2(0.0), vec2(1.0));
         vec3 e = texture2D(uHeightMap, uv).rgb * 255.0;
         return (e.r * 256.0 + e.g + e.b / 256.0) - 32768.0;
       }
@@ -170,24 +168,21 @@ function patchMaterial(
       #include <begin_vertex>
       float elevM = sampleElevM(uv);
       transformed.y += elevM * uElevScale;
+      `,
+    );
 
-      // Analytic normal from the four neighbouring height texels (the GPU
-      // displacement doesn't update normals on its own). Derived for a
-      // PlaneGeometry rotated flat: n = (hL-hR, 2·texel·tileUnits, hU-hD).
-      float texel = 1.0 / ${HEIGHT_PX.toFixed(1)};
-      float hL = sampleElevM(uv - vec2(texel, 0.0)) * uElevScale;
-      float hR = sampleElevM(uv + vec2(texel, 0.0)) * uElevScale;
-      float hD = sampleElevM(uv - vec2(0.0, texel)) * uElevScale;
-      float hU = sampleElevM(uv + vec2(0.0, texel)) * uElevScale;
-      float span = 2.0 * texel * ${TILE_UNITS.toFixed(1)};
-      vTileNormal = normalize(vec3(hL - hR, span, hU - hD));
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <project_vertex>',
+      `
+      #include <project_vertex>
+      vWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
       `,
     );
 
     shader.fragmentShader =
       `
       uniform vec3 uTint;
-      varying vec3 vTileNormal;
+      varying vec3 vWorldPos;
     ` + shader.fragmentShader;
 
     // Tint the (photographic) imagery — day = identity, night = cool dim.
@@ -199,14 +194,13 @@ function patchMaterial(
       `,
     );
 
-    // Drive lighting from the recomputed terrain normal. The mesh is unrotated
-    // (only the geometry was pre-rotated), so the rigid viewMatrix rotation maps
-    // the world-space normal into the view space the lighting chunks expect.
+    // Drive lighting from geometric normal in world space so displaced terrain
+    // and tile boundaries shade consistently without heightmap normal seams.
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <normal_fragment_begin>',
       `
       #include <normal_fragment_begin>
-      normal = normalize(mat3(viewMatrix) * normalize(vTileNormal));
+      normal = normalize(mat3(viewMatrix) * normalize(cross(dFdx(vWorldPos), dFdy(vWorldPos))));
       `,
     );
   };
@@ -275,7 +269,7 @@ export function createTileTerrain(
       positions[vi++] = -SKIRT_DEPTH;
       positions[vi++] = -half;
       uvs[ui++] = ux;
-      uvs[ui++] = 0; // match mirrored texture: bottom edge = V=0
+      uvs[ui++] = 1; // match top surface south edge: V=1
     }
     // Top edge (z = seg, north)
     for (let x = 0; x < seg; x++) {
@@ -284,7 +278,7 @@ export function createTileTerrain(
       positions[vi++] = -SKIRT_DEPTH;
       positions[vi++] = half;
       uvs[ui++] = ux;
-      uvs[ui++] = 1; // match mirrored texture: top edge = V=1
+      uvs[ui++] = 0; // match top surface north edge: V=0
     }
     // Left edge (x = 0, west) — note: world east = -X, so west = +X
     for (let z = 0; z < seg; z++) {
@@ -292,7 +286,7 @@ export function createTileTerrain(
       positions[vi++] = -half;
       positions[vi++] = -SKIRT_DEPTH;
       positions[vi++] = (uz - 0.5) * TILE_UNITS;
-      uvs[ui++] = 1; // match mirrored texture: left edge = U=1
+      uvs[ui++] = 0; // match top surface west edge: U=0
       uvs[ui++] = 1 - uz;
     }
     // Right edge (x = seg, east)
@@ -301,7 +295,7 @@ export function createTileTerrain(
       positions[vi++] = half;
       positions[vi++] = -SKIRT_DEPTH;
       positions[vi++] = (uz - 0.5) * TILE_UNITS;
-      uvs[ui++] = 0; // match mirrored texture: right edge = U=0
+      uvs[ui++] = 1; // match top surface east edge: U=1
       uvs[ui++] = 1 - uz;
     }
 
