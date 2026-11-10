@@ -364,15 +364,24 @@ async def flights_rest():
 
 
 # Serve the built Angular frontend
-# SPA catch-all: serve index.html for client-side routes (coordinate URLs, etc.)
-# Must be defined BEFORE static mount so it catches unmatched routes first.
-# Exclude API, WebSocket, and asset paths (they 404 naturally if not found).
-@app.get("/{full_path:path}")
-async def spa(full_path: str):
-    # Let API, WS, and static assets fall through to 404 (served by mount or explicit routes)
-    if full_path.startswith(("api/", "ws/", "chunk-", "main-", "polyfills-", "styles-", "logo.", "markers/", "favicon.", "assets/")):
-        from fastapi import HTTPException
-        raise HTTPException(status_code=404)
-    return FileResponse("/app/dist/plane-tracker/browser/index.html")
-
+# Static files first (assets, index.html for root). Mount at root with html=True.
 app.mount("/", StaticFiles(directory="/app/dist/plane-tracker/browser", html=True), name="static")
+
+# Middleware: on 404 for non-asset/API paths, serve index.html (SPA fallback)
+from starlette.responses import FileResponse
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+
+class SPAMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        if response.status_code == 404:
+            path = request.url.path.lstrip("/")
+            # Skip API, WS, and asset paths — let them 404
+            if path.startswith(("api/", "ws/", "chunk-", "main-", "polyfills-", "styles-", "logo.", "markers/", "favicon.", "assets/")):
+                return response
+            # Serve index.html for client-side routes
+            return FileResponse("/app/dist/plane-tracker/browser/index.html")
+        return response
+
+app.add_middleware(SPAMiddleware)
