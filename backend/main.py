@@ -364,9 +364,15 @@ async def flights_rest():
 
 
 # Serve the built Angular frontend
-app.mount("/", StaticFiles(directory="/app/dist/plane-tracker/browser", html=True), name="static")
-
-
+# SPA catch-all: serve index.html for client-side routes (coordinate URLs, etc.)
+# Must be defined BEFORE static mount so it catches unmatched routes first.
+# Exclude API, WebSocket, and asset paths (they 404 naturally if not found).
 @app.get("/{full_path:path}")
 async def spa(full_path: str):
+    # Let API, WS, and static assets fall through to 404 (served by mount or explicit routes)
+    if full_path.startswith(("api/", "ws/", "chunk-", "main-", "polyfills-", "styles-", "logo.", "markers/", "favicon.", "assets/")):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404)
     return FileResponse("/app/dist/plane-tracker/browser/index.html")
+
+app.mount("/", StaticFiles(directory="/app/dist/plane-tracker/browser", html=True), name="static")
