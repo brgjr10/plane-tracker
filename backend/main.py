@@ -17,8 +17,8 @@ log = logging.getLogger("planetracker")
 OPENSKY_URL = "https://opensky-network.org/api/states/all"
 OPENSKY_FLIGHT_URL = "https://opensky-network.org/api/flights/aircraft"
 OPENSKY_TOKEN_URL = "https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token"
-BASE_POLL_INTERVAL_SEC = 10.0
-MAX_POLL_INTERVAL_SEC = 120.0
+BASE_POLL_INTERVAL_SEC = 30.0
+MAX_POLL_INTERVAL_SEC = 180.0
 ROUTE_ENRICH_INTERVAL_SEC = 300.0  # 5 min
 ROUTE_CACHE_TTL_SEC = 86400.0  # 24h
 
@@ -295,8 +295,8 @@ async def poll_flights():
                 fleet.clear()
                 fleet.update(new_fleet)
                 # Enrich with route info (origin/destination) from OpenSky flight metadata
-                if used_source == "OpenSky":
-                    await enrich_routes(client, fleet)
+                # Works for any source that provides callsigns (OpenSky, adsb.lol, adsb.fi)
+                await enrich_routes(client, fleet)
                 payload = {
                     "type": "fleet",
                     "ts": datetime.now(tz=timezone.utc).isoformat(),
