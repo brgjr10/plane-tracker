@@ -224,140 +224,30 @@ export function createTileTerrain(
   const tintColor = theme === 'day' ? TINT_DAY.clone() : TINT_NIGHT.clone();
   let currentTheme: MapTheme = theme;
 
-  // --- Build the fixed tile pool -------------------------------------------
+// --- Build the fixed tile pool -------------------------------------------
   const tiles: Tile[] = [];
-  // Skirt depth: must exceed max possible vertex displacement so the vertical
-// walls reach "bedrock" even after the shader lifts the top surface.
-// Max elevation diff within a tile ~2000 m, elevScale ~1.2 → ~2400 units.
-// Use 20000 for a huge margin.
-  const SKIRT_DEPTH = 20000;
 
   for (let i = 0; i < (GRID_RADIUS * 2 + 1) ** 2; i++) {
-    // Build a plane with skirts: a grid of (TILE_SEGMENTS+1)^2 top vertices +
-    // 4 * TILE_SEGMENTS skirt vertices around the perimeter.
-    const seg = TILE_SEGMENTS;
-    const half = TILE_UNITS / 2;
-    const topCount = (seg + 1) * (seg + 1);
-    const skirtCount = 4 * seg;
-    const totalVerts = topCount + skirtCount;
+    // A plain subdivided plane, rotated to lie flat in the XZ plane with Y up.
+    // Three.js PlaneGeometry's vertex layout, UVs and winding are identical to
+    // the hand-rolled mesh that was here before (verified: same positions/UVs/
+    // triangle winding), so the shader's `uv` sampling and the imagery mapping
+    // are unchanged. No edge skirts: they were a 20 000-unit-deep vertical
+    // quad at every tile boundary, which is exactly the "90° wall" artifact
+    // the user reported — see the fix notes below.
+    const geometry = new THREE.PlaneGeometry(
+      TILE_UNITS,
+      TILE_UNITS,
+      TILE_SEGMENTS,
+      TILE_SEGMENTS,
+    );
+    geometry.rotateX(-Math.PI / 2); // lie flat: +Y is up, uv still spans the tile
 
-    const positions = new Float32Array(totalVerts * 3);
-    const uvs = new Float32Array(totalVerts * 2);
-    const indices = [];
-
-    let vi = 0, ui = 0;
-
-    // Top surface vertices (y = 0, displacement in shader)
-    for (let z = 0; z <= seg; z++) {
-      for (let x = 0; x <= seg; x++) {
-        const ux = x / seg;
-        const uz = z / seg;
-        positions[vi++] = (ux - 0.5) * TILE_UNITS;
-        positions[vi++] = 0;
-        positions[vi++] = (uz - 0.5) * TILE_UNITS;
-        uvs[ui++] = ux;
-        uvs[ui++] = 1 - uz; // flip V so uv(0,0) = NW corner (matches imagery)
-      }
-    }
-
-    // Skirt vertices: for each edge, add a ring of vertices at y = -SKIRT_DEPTH
-    // with same x/z as the edge, same u/v as the edge.
-    // Bottom edge (z = 0, south)
-    for (let x = 0; x < seg; x++) {
-      const ux = (x + 0.5) / seg;
-      positions[vi++] = (ux - 0.5) * TILE_UNITS;
-      positions[vi++] = -SKIRT_DEPTH;
-      positions[vi++] = -half;
-      uvs[ui++] = ux;
-      uvs[ui++] = 1; // match top surface south edge: V=1
-    }
-    // Top edge (z = seg, north)
-    for (let x = 0; x < seg; x++) {
-      const ux = (x + 0.5) / seg;
-      positions[vi++] = (ux - 0.5) * TILE_UNITS;
-      positions[vi++] = -SKIRT_DEPTH;
-      positions[vi++] = half;
-      uvs[ui++] = ux;
-      uvs[ui++] = 0; // match top surface north edge: V=0
-    }
-    // Left edge (x = 0, west) — note: world east = -X, so west = +X
-    for (let z = 0; z < seg; z++) {
-      const uz = (z + 0.5) / seg;
-      positions[vi++] = -half;
-      positions[vi++] = -SKIRT_DEPTH;
-      positions[vi++] = (uz - 0.5) * TILE_UNITS;
-      uvs[ui++] = 0; // match top surface west edge: U=0
-      uvs[ui++] = 1 - uz;
-    }
-    // Right edge (x = seg, east)
-    for (let z = 0; z < seg; z++) {
-      const uz = (z + 0.5) / seg;
-      positions[vi++] = half;
-      positions[vi++] = -SKIRT_DEPTH;
-      positions[vi++] = (uz - 0.5) * TILE_UNITS;
-      uvs[ui++] = 1; // match top surface east edge: U=1
-      uvs[ui++] = 1 - uz;
-    }
-
-    // Indices: top surface quads (two triangles each)
-    for (let gz = 0; gz < seg; gz++) {
-      for (let gx = 0; gx < seg; gx++) {
-        const a = gz * (seg + 1) + gx;
-        const b = gz * (seg + 1) + gx + 1;
-        const c = (gz + 1) * (seg + 1) + gx;
-        const d = (gz + 1) * (seg + 1) + gx + 1;
-        indices.push(a, c, b);
-        indices.push(b, c, d);
-      }
-    }
-
-    // Skirt triangles: for each edge, connect each top edge vertex to its
-    // corresponding skirt vertex and the next top edge vertex.
-    // Each edge has seg segments → seg skirt vertices → seg triangles.
-    // Use consistent winding: (topIdx, nextTop, skirtIdx) for all edges
-    // to ensure normals point outward/downward correctly.
-    const skirtBase = topCount;
-    // Bottom edge (south, z=0): top vertices 0..seg, skirt vertices 0..seg-1
-    for (let x = 0; x < seg; x++) {
-      const topIdx = x;
-      const nextTop = x + 1;
-      const skirtIdx = skirtBase + x;
-      indices.push(topIdx, nextTop, skirtIdx);
-    }
-    // Top edge (north, z=seg): top vertices seg*(seg+1) .. seg*(seg+1)+seg
-    for (let x = 0; x < seg; x++) {
-      const topIdx = seg * (seg + 1) + x;
-      const nextTop = seg * (seg + 1) + x + 1;
-      const skirtIdx = skirtBase + seg + x;
-      indices.push(topIdx, nextTop, skirtIdx);
-    }
-    // Left edge (west, x=0): top vertices 0, seg+1, 2*(seg+1), ..., seg*(seg+1)
-    for (let z = 0; z < seg; z++) {
-      const topIdx = z * (seg + 1);
-      const nextTop = (z + 1) * (seg + 1);
-      const skirtIdx = skirtBase + 2 * seg + z;
-      indices.push(topIdx, nextTop, skirtIdx);
-    }
-    // Right edge (east, x=seg): top vertices seg, 2*seg+1, ..., seg*(seg+1)+seg
-    for (let z = 0; z < seg; z++) {
-      const topIdx = z * (seg + 1) + seg;
-      const nextTop = (z + 1) * (seg + 1) + seg;
-      const skirtIdx = skirtBase + 3 * seg + z;
-      indices.push(topIdx, nextTop, skirtIdx);
-    }
-
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
-    geometry.setIndex(indices);
-    geometry.computeBoundingSphere();
-    // No need to rotate — vertices are already in XZ plane with Y up.
-
-const material = new THREE.MeshStandardMaterial({
+    const material = new THREE.MeshStandardMaterial({
       map: placeholderImagery,
       roughness: 1,
       metalness: 0,
-      side: THREE.DoubleSide, // skirts + displaced top can have inconsistent winding
+      side: THREE.DoubleSide, // displaced terrain can face either way at a valley
     });
 
     const uElevScale = { value: elevScale };
@@ -366,7 +256,8 @@ const material = new THREE.MeshStandardMaterial({
     patchMaterial(material, uElevScale, uTint, uHeightMap);
 
     const mesh = new THREE.Mesh(geometry, material);
-    // Slight overlap + skirts = no visible cracks.
+    // Slight overlap hides hairline cracks between independently displaced
+    // tiles (edge height/normal sampling can differ at shared borders).
     mesh.scale.set(1.002, 1, 1.002);
     mesh.frustumCulled = false;
     group.add(mesh);
