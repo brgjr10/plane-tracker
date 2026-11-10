@@ -14,6 +14,19 @@
     <span class="map__toggle__label">{{ hideGrounded() ? 'Show grounded' : 'Hide grounded' }}</span>
   </button>
 
+  @if (!feedConnected() && feedError(); as error) {
+    <div class="map__banner" role="alert" aria-live="polite">
+      <p class="map__banner__message">{{ error }}</p>
+      <button
+        class="map__banner__dismiss"
+        (click)="dismissFeedError()"
+        aria-label="Dismiss"
+      >
+        &times;
+      </button>
+    </div>
+  }
+
   @if (!mapReady) {
     <div class="map__status" role="status" [class.map__status--error]="loadError">
       @if (loadError) {

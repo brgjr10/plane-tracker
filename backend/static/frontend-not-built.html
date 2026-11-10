@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plane Tracker &#8212; frontend not built</title>
+<style>
+  body { background: #0d1117; color: #c9d1d9; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; padding: 48px 24px; line-height: 1.6; }
+  .card { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 32px; max-width: 640px; margin: 0 auto; }
+  h1 { color: #58a6ff; margin: 0 0 16px 0; font-size: 24px; }
+  p { margin: 16px 0; }
+  code { background: #0d1117; color: #f85149; padding: 2px 6px; border-radius: 4px; font-family: ui-monospace, SFMono-Regular, "Segoe UI Emoji", monospace; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Plane Tracker frontend not built</h1>
+  <p>The Angular frontend has not been built yet, so there is nothing to serve from <code>/app/dist/plane-tracker/browser/</code>.</p>
+  <p>The backend API is still running: <code>GET /api/flights</code> and <code>ws:///ws/flights</code> are available.</p>
+  <p>To build the frontend, run in the repo root:</p>
+  <p style="margin: 8px 0;"><code>npm run build</code></p>
+  <p>After the build finishes, restart <code>python backend/main.py</code>.</p>
+</div>
+</body>
+</html>

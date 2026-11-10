@@ -95,7 +95,7 @@ Scene
  └─ Stars (dome, night-only)
 
 Animation Loop (requestAnimationFrame):
-  1. Advance sim time by delta × VISUAL_TIME_SCALE (0.15)
+  1. Advance sim time by delta × VISUAL_TIME_SCALE (1.0)
   2. Update aircraft position/heading from fleet
   3. Update terrain anchor (lat/lon/alt) → TerrainManager.reload()
   4. Update cloud parallax, wing trails, banking animation
@@ -127,11 +127,11 @@ Background Tasks:
 
 2. **Great-circle interpolation (slerp)** — Matches Leaflet's `geodesic: true` polylines; avoids antimeridian drift and keeps heading aligned with path tangent.
 
-3. **Shared static data** — `AIRLINE_ROUTES` map duplicated in frontend (for client-side enrichment) and backend (for server-side enrichment). Single source of truth would require a shared package.
+3. **Shared static data** — `AIRLINE_ROUTES` map duplicated in frontend (for client-side enrichment) and backend (for server-side enrichment). Stores ICAO codes; both copies share an `ICAO_TO_IATA` translation table so the IATA-keyed `AIRPORTS` map can resolve them. Single source of truth would require a shared package.
 
 4. **Terrain anchored to aircraft** — 3D view reloads imagery/elevation tiles around current position each frame; works because both sources are keyless and CORS-enabled.
 
-5. **Visual time scale (0.15)** — Slows 2000–3500 kts sim speed to ~300–525 kts visual groundspeed to prevent tile thrashing and allow terrain streaming.
+5. **Visual time scale (1.0)** — Samples the simulator at real time. The 0.15 slowdown was a workaround for hypersonic base speeds; with realistic 420–530 kts the tile grid (anchored to true lat/lon) loads at a natural pace, so no artificial slowdown is needed.
 
 6. **No real ATC data** — Radio service is 100% synthetic atmosphere using browser TTS + Web Audio.
 

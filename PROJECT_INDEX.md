@@ -81,7 +81,7 @@ This repository contains a **flight tracking application** with both a client-si
 |--------|--------|
 | **Primary data source (dev)** | Client-side simulator (20 flights, deterministic) |
 | **Primary data source (prod)** | OpenSky Network API (live, global) |
-| **Route overlays** | Only for seeded flights (live flights lack origin/dest) |
+| **Route overlays** | **Seeded flights**: always. **Live flights**: when the callsign prefix matches `AIRLINE_ROUTES` *and* both airports resolve in the `AIRPORTS` table (ICAO→IATA translated at enrichment time). |
 | **Progress/ETA** | Simulated only (live: progress=0, ETA=empty) |
 | **Aircraft type** | Seed data only (OpenSky doesn't provide) |
 | **3D terrain** | Real-world (Esri imagery + AWS elevation, keyless) |
@@ -90,12 +90,13 @@ This repository contains a **flight tracking application** with both a client-si
 
 ## Known Gaps (from `FEATURE_DATA_MAP.md`)
 
-- `AIRLINE_ROUTES` map duplicated in frontend + backend
+- `AIRLINE_ROUTES` map duplicated in frontend + backend (stores ICAO; both copies share an `ICAO_TO_IATA` translation table — keep them in sync)
 - Live flights have no `aircraft` type, no `progress`, no `ETA`
-- Route overlay only draws for seeded flights
+- Route overlay only draws for seeded flights **and** for live flights whose callsign prefix matches `AIRLINE_ROUTES` with both airports seeded
 - Model offsets hardcoded for current OBJ file
 - No automated tests for Three.js components
 - Cluster count badge not accessible (a11y)
+- `VISUAL_TIME_SCALE` and `REFERENCE_SPEED_KTS` are visual tuning constants, not derived from physics
 
 ## Getting Started
 

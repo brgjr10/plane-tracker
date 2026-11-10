@@ -100,7 +100,7 @@ interface Aircraft {
 | `longitude` | ✓ (slerp) | ✓ (state[5]) | ✓ (lon) |
 | `altitude` | ✓ (profile) | ✓ (state[7] m→ft) | ✓ (alt_baro ft) |
 | `heading` | ✓ (bearing) | ✓ (state[10]) | ✓ (track deg) |
-| `speed` | ✓ (random 2000-3500) | ✓ (state[9] m/s→kts) | ✓ (gs kts) |
+| `speed` | ✓ (random 420–530) | ✓ (state[9] m/s→kts) | ✓ (gs kts) |
 | `progress` | ✓ (0-1 loop) | **0** | **0** |
 | `onGround` | **false** | ✓ (state[8]) | ✓ (on_ground) |
 | `departure` | ✓ (leg start) | ✓ (state[3]→ISO) | ~ (not in readsb) |
@@ -344,7 +344,7 @@ if (route) {
 }
 ```
 
-**Static Map (`AIRLINE_ROUTES`):** ~50 entries mapping ICAO airline code → {from, to} IATA pair. Duplicated in frontend and backend.
+**Static Map (`AIRLINE_ROUTES`):** ~40 entries mapping ICAO airline code → (origin ICAO, destination ICAO) pair. Duplicated in frontend and backend; both copies translate ICAO→IATA at enrichment time via a shared `ICAO_TO_IATA` table so the IATA-keyed `AIRPORTS` map can resolve them.
 
 ---
 

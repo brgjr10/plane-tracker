@@ -1,7 +1,32 @@
 import { Injectable, signal, effect, inject, NgZone } from '@angular/core';
 import { Aircraft } from '../models/aircraft.model';
+import { AIRPORTS } from '../data/seed-data';
 
-/** Static airline route mapping: callsign prefix -> (origin, destination) IATA codes. */
+/**
+ * Static airline route mapping: callsign prefix -> (origin, destination) airport
+ * codes. The codes here are **ICAO** (4-letter, e.g. EGLL), which is what airline
+ * callsigns naturally carry (BAW, AFR, DLH are ICAO airline designators).
+ *
+ * The map is resolved against the seed `AIRPORTS` table (keyed by **IATA**,
+ * 3-letter, e.g. LHR) at enrichment time via `ICAO_TO_IATA`. Only airports present
+ * in `AIRPORTS` can draw a route; the rest are silently skipped (best-effort).
+ */
+const ICAO_TO_IATA: Record<string, string> = {
+  KDFW: 'DFW', KLAX: 'LAX', KATL: 'ATL', KORD: 'ORD', KSFO: 'SFO',
+  KDAL: 'DAL', KPHX: 'PHX', KJFK: 'JFK', KSEA: 'SEA', KPDX: 'PDX',
+  KDEN: 'DEN', KLAS: 'LAS', KFLL: 'FLL', KLGA: 'LGA', PHNL: 'HNL', KOGG: 'OGG',
+  CYYZ: 'YYZ', CYVR: 'YVR', CYYC: 'YYC',
+  EGLL: 'LHR', EHAM: 'AMS', LFPG: 'CDG', LFMN: 'MRS', EDDF: 'FRA', EDDM: 'MUC',
+  LEMD: 'MAD', EIDW: 'DUB', LIRF: 'FCO', EGKK: 'LGW', ESSA: 'ARN', EKCH: 'CPH',
+  EFHK: 'HEL', EFVA: 'TMP', LEBL: 'BCN', LEPA: 'PAQ',
+  OMDB: 'DXB', OTHH: 'DOH', OMAA: 'MCT',
+  WSSS: 'SIN', WMKK: 'KUL', VHHH: 'HKG', ZBAA: 'PEK', RJAA: 'HND', RJBB: 'KIX',
+  RJTT: 'HND', RJOO: 'KIX', RKSI: 'ICN', RKPK: 'PUS', ZGGG: 'CAN', ZSPD: 'SHA',
+  VTBD: 'BKK', VTCC: 'CNX', WIII: 'CGK', WAHH: 'HLP',
+  YSSY: 'SYD', YMML: 'MEL', YBBN: 'BNE',
+  KMEM: 'MEM', KIND: 'IND', KSDF: 'SDF', KONT: 'ONT',
+};
+
 const AIRLINE_ROUTES: Record<string, [string, string]> = {
   // US majors
   AAL: ['KDFW', 'KLAX'], DAL: ['KATL', 'KLAX'], UAL: ['KORD', 'KSFO'],
@@ -40,9 +65,19 @@ export class LiveFlightService {
   readonly fleet = this.fleetSignal.asReadonly();
   readonly connected = signal(false);
 
+  /** Feed error surfaced to the UI when reconnect retries are exhausted. */
+  private readonly feedErrorSignal = signal<string | null>(null);
+  readonly feedError = this.feedErrorSignal.asReadonly();
+
   private ws?: WebSocket;
   /** Track enrichment timers to clear on disconnect. */
   private enrichTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
+
+  /** Bounded reconnect policy: 3s initial backoff, doubling each attempt, capped at ~60s, give up after 7 failed attempts. */
+  private readonly RECONNECT_INITIAL_MS = 3000;
+  private readonly RECONNECT_MAX_MS = 60000;
+  private readonly RECONNECT_MAX_ATTEMPTS = 7;
+  private reconnectAttempts = 0;
 
   constructor() {
     this.connect();
@@ -60,7 +95,11 @@ export class LiveFlightService {
     this.ws = new WebSocket(url);
 
     this.ws.onopen = () => {
-      this.zone.run(() => this.connected.set(true));
+      this.zone.run(() => {
+        this.connected.set(true);
+        this.reconnectAttempts = 0;
+        this.feedErrorSignal.set(null);
+      });
       log('[LiveFlightService] connected');
     };
 
@@ -84,14 +123,37 @@ export class LiveFlightService {
       // Clear pending enrichment timers
       this.enrichTimers.forEach((timer) => clearTimeout(timer));
       this.enrichTimers.clear();
-      log('[LiveFlightService] disconnected; reconnecting in 3s');
       this.ws = undefined;
-      setTimeout(() => this.connect(), 3000);
+
+      if (this.reconnectAttempts >= this.RECONNECT_MAX_ATTEMPTS) {
+        this.zone.run(() => {
+          this.feedErrorSignal.set(
+            `Live feed unavailable: reconnection failed after ${this.RECONNECT_MAX_ATTEMPTS} attempts.`,
+          );
+        });
+        log('[LiveFlightService] disconnected; max reconnect attempts reached, giving up');
+        return;
+      }
+
+      this.reconnectAttempts++;
+      const backoffMs = Math.min(
+        this.RECONNECT_INITIAL_MS * 2 ** (this.reconnectAttempts - 1),
+        this.RECONNECT_MAX_MS,
+      );
+      log(
+        `[LiveFlightService] disconnected; reconnecting in ${backoffMs}ms (attempt ${this.reconnectAttempts}/${this.RECONNECT_MAX_ATTEMPTS})`,
+      );
+      setTimeout(() => this.connect(), backoffMs);
     };
 
     this.ws.onerror = (err) => {
       log('[LiveFlightService] error', err);
     };
+  }
+
+  /** Clear the feed error state (e.g. user dismissed the error banner). */
+  clearFeedError(): void {
+    this.feedErrorSignal.set(null);
   }
 
   /** Schedule incremental route enrichment for aircraft with commercial callsigns. */
@@ -125,12 +187,18 @@ export class LiveFlightService {
   private enrichSingle(icao24: string, airline: string): void {
     const route = AIRLINE_ROUTES[airline];
     if (!route) return;
-    const [origin, destination] = route;
+    // AIRLINE_ROUTES stores ICAO codes; the map resolves them against the
+    // IATA-keyed AIRPORTS table. Skip airports we don't have coordinates for.
+    const originIata = ICAO_TO_IATA[route[0]];
+    const destIata = ICAO_TO_IATA[route[1]];
+    if (!originIata || !destIata || !AIRPORTS[originIata] || !AIRPORTS[destIata]) {
+      return;
+    }
     this.fleetSignal.update((fleet) =>
       fleet.map((ac) => {
         const key = (ac as any).icao24 || ac.flightId;
         if (key === icao24 && !ac.source && !ac.destination) {
-          return { ...ac, source: origin, destination };
+          return { ...ac, source: originIata, destination: destIata };
         }
         return ac;
       })

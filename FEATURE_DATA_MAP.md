@@ -32,7 +32,7 @@ The app **currently runs entirely on the client-side simulator**. The backend ex
 | Destination airport | `destination.code`, `destination.city`, `destination.airport` | `Aircraft.destination` (IATA) → resolved via `AIRPORTS` static map |
 | Progress bar | `progress` (0–1) | **Simulator**: computed from great-circle distance + speed × elapsed time<br>**Live (OpenSky)**: always `0` (not provided by API) |
 | Altitude | `altitudeFt` | **Simulator**: vertical profile (climb/cruise/descent) from `progress`<br>**Live**: `baro_altitude` from OpenSky state vector (m → ft) |
-| Speed | `speedKts` | **Simulator**: randomised 2000–3500 kts per flight<br>**Live**: `velocity` from OpenSky (m/s → kts) |
+| Speed | `speedKts` | **Simulator**: randomised 420–530 kts per flight<br>**Live**: `velocity` from OpenSky (m/s → kts) |
 | Heading | `headingDeg` | **Simulator**: great-circle bearing from current position to destination<br>**Live**: `true_track` from OpenSky (degrees) |
 
 **Unused / never rendered in panel:**
@@ -73,7 +73,7 @@ The app **currently runs entirely on the client-side simulator**. The backend ex
 | `latitude`, `longitude` | Spherical slerp (`interpolatePosition`) along great-circle from `route.source` → `route.destination` at fraction `progress` |
 | `progress` (0→1 loop) | `(speedKts × elapsedHours) % distanceNm / distanceNm` — wraps continuously |
 | `heading` | `bearing(currentPosition, route.destination)` — great-circle initial bearing |
-| `speed` | Randomised per flight: `2000 + Math.random() × 1500` kts (constant per flight) |
+| `speed` | Randomised per flight: `420 + Math.random() × 110` kts (constant per flight) |
 | `altitude` | Piecewise: climb 0→15% (0→35k ft), cruise 15%→85% (35k ft), descent 85%→100% (35k→0 ft) |
 | `departure` | `new Date(legStartMs).toISOString()` — recomputed each loop |
 | `eta` | **Always empty string** — `// ETA intentionally deferred for now (Phase 2 scope)` |
@@ -93,7 +93,7 @@ The app **currently runs entirely on the client-side simulator**. The backend ex
 | WebSocket connection | `/ws/flights` (same host, `ws:` or `wss:`) |
 | Fleet updates | Server pushes full fleet snapshot every 10s (OpenSky) or 10s (fallback ADS-B) |
 | Aircraft normalisation | Maps backend dict → strict `Aircraft` interface (see `normalise()`) |
-| Route enrichment | **Client-side**, incremental: matches `flightId` callsign prefix (e.g. `BAW123` → `BAW`) against static `AIRLINE_ROUTES` map (copied from backend) — adds `source`/`destination` IATA codes |
+| Route enrichment | **Client-side**, incremental: matches `flightId` callsign prefix (e.g. `BAW123` → `BAW`) against static `AIRLINE_ROUTES` map (copied from backend). The map stores **ICAO** airport codes (e.g. `EGLL`); `enrichSingle()` translates them to **IATA** (e.g. `LHR`) via `ICAO_TO_IATA` and only assigns them when the IATA code resolves in the `AIRPORTS` table — so only seeded airports can draw a route. |
 | Enrichment scheduling | Staggered 80ms per aircraft to avoid UI jank |
 
 **Backend data flow (FastAPI `main.py`):**
@@ -102,7 +102,7 @@ The app **currently runs entirely on the client-side simulator**. The backend ex
 3. Maps each source to `Aircraft`-shaped dict:
    - OpenSky: `opensky_to_aircraft()` — uses state vector indices
    - ADS-B (readsb-style): `readsb_to_aircraft()` — uses `lat`, `lon`, `alt_baro`, `track`, `gs`, `flight`, `hex`, `t`, `on_ground`
-4. Enriches routes via `enrich_routes_static()` — same static `AIRLINE_ROUTES` map
+4. Enriches routes via `enrich_routes_static()` — same static `AIRLINE_ROUTES` map. The map stores **ICAO** codes; the function translates them to **IATA** via `ICAO_TO_IATA` so the frontend's IATA-keyed `AIRPORTS` table can resolve them. |
 5. Broadcasts via WebSocket + REST `/api/flights`
 
 **Fields populated from live OpenSky:**
@@ -141,7 +141,7 @@ The app **currently runs entirely on the client-side simulator**. The backend ex
 | **Wing trails** | GPU particle streaks (`wing-trails.ts`) — attached to bank group, rolls with banking |
 | **Stars** | 820 points on dome (`stars.ts`) — visible only in night theme |
 | **Banking (roll)** | Procedural: random ±8–18° every 4–10s, 60% chance when level, eased at 1.5/s |
-| **Time scaling** | `VISUAL_TIME_SCALE = 0.15` — slows simulator clock so 2000–3500 kts → ~300–525 kts visual groundspeed (prevents tile thrashing) |
+| **Time scaling** | `VISUAL_TIME_SCALE = 1.0` — samples the simulator at real time. The 0.15 slowdown was a workaround for hypersonic base speeds; with realistic 420–530 kts the tile grid (anchored to true lat/lon) loads at a natural pace, so no artificial slowdown is needed. |
 | **Cockpit view** | First-person camera at fixed offset from aircraft origin, rolls with bank |
 | **Chase camera** | Third-person, lerps behind aircraft (distance 18, height 6) until user orbits |
 | **Radio chatter** | `RadioService` — browser TTS (SpeechSynthesis) + Web Audio noise bed/crackle/roger beep |
@@ -149,7 +149,7 @@ The app **currently runs entirely on the client-side simulator**. The backend ex
 
 **Unused / mock data in 3D view:**
 - `MODEL_YAW_OFFSET_DEG`, `MODEL_PITCH_OFFSET_DEG`, `MODEL_NOSE_YAW_DEG` — hardcoded corrections for the specific OBJ model; would need adjustment for different models
-- `REFERENCE_SPEED_KTS = 2000` — arbitrary reference for cloud scroll factor
+- `REFERENCE_SPEED_KTS = 480` — arbitrary reference for cloud scroll factor (visual tuning only)
 - `CLOUD_SCROLL_UNITS = 8`, `FLOW_YAW_OFFSET_DEG = 0` — visual tuning constants
 - Terrain `TERRAIN_BASE_Y` — initial Y offset before live position anchors it
 
@@ -223,7 +223,7 @@ The app **currently runs entirely on the client-side simulator**. The backend ex
 | `Aircraft.progress` | Always `0` for live — **route overlay cannot draw** without it |
 | `Aircraft.eta` | Always `''` — never filled by any source |
 | `Aircraft.departure` | Filled from OpenSky `state[3]` (last contact) — **not displayed in panel** |
-| `AIRLINE_ROUTES` static map | Duplicated in **both** frontend (`live-flight.service.ts`) and backend (`main.py`) — backend uses it for enrichment, frontend re-enriches client-side |
+| `AIRLINE_ROUTES` static map | Duplicated in **both** frontend (`live-flight.service.ts`) and backend (`main.py`) — must stay in sync. Stores **ICAO** airport codes; both copies translate to **IATA** via a shared `ICAO_TO_IATA` table so the frontend's IATA-keyed `AIRPORTS` map can resolve them. |
 
 ### In Map Component
 | Item | Status |
