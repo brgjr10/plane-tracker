@@ -4,6 +4,12 @@
 
 A live flight tracker built in Angular 19 — simulated aircraft moving along real great-circle routes across continents, with a Leaflet 2D map and a Three.js 3D chase-camera view (plus a cockpit mode). Designed as the frontend for a future event-driven backend, so every model is shaped like the Kafka event that will eventually feed it.
 
+<img width="1365" height="638" alt="2D map — day mode" src="https://github.com/user-attachments/assets/b04b9938-d32e-439c-9cc8-e451e868a2b8" />
+
+<img width="1364" height="634" alt="image" src="https://github.com/user-attachments/assets/34e24c19-edb0-43be-84b4-f5a3009628d7" />
+
+<img width="1363" height="633" alt="3D flight view — day mode" src="https://github.com/user-attachments/assets/ba8353fc-7bfb-4057-8281-363aca574b7c" />
+
 ---
 
 ## Architecture
