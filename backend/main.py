@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 from datetime import datetime, timezone
 from typing import Dict, Optional
@@ -39,6 +40,12 @@ _token_expires_at: float = 0.0
 # Route cache: icao24 -> {"origin": "KJFK", "destination": "KLAX", "cached_at": 1234567890.0}
 _route_cache: Dict[str, dict] = {}
 
+# Enrichment concurrency/rate limits
+_ENRICH_SEMAPHORE = asyncio.Semaphore(3)  # max 3 concurrent OpenSky flight requests
+_ENRICH_MAX_PER_CYCLE = 10  # max aircraft to enrich per poll cycle
+# Callsign pattern: airline code (2-3 letters) + flight number (1-4 digits), e.g., UAL123, BA456
+_CALLSIGN_RE = re.compile(r"^[A-Z]{2,3}\d{1,4}$")
+
 
 async def get_access_token(client: httpx.AsyncClient) -> Optional[str]:
     """Fetch or refresh an OpenSky OAuth2 access token via client credentials flow."""
@@ -70,52 +77,60 @@ async def get_access_token(client: httpx.AsyncClient) -> Optional[str]:
 
 
 async def enrich_routes(client: httpx.AsyncClient, fleet: Dict[str, dict]) -> None:
-    """Fetch origin/destination from OpenSky flight metadata for aircraft with callsigns."""
+    """Fetch origin/destination from OpenSky flight metadata for aircraft with commercial-like callsigns.
+    Runs with concurrency limit and max-per-cycle to avoid rate limits."""
     token = await get_access_token(client)
     if not token:
         return
     headers = {"Authorization": f"Bearer {token}"}
     now = time.time()
-    # Candidates: have callsign (not just hex), missing route, not cached or expired
+    
+    # Candidates: commercial-like callsign, missing route, not cached or expired
     candidates = [
         (icao24, ac) for icao24, ac in fleet.items()
-        if ac.get("callsign") and not ac.get("source") and not ac.get("destination")
+        if ac.get("callsign") and _CALLSIGN_RE.match(ac["callsign"].strip().upper())
+        and not ac.get("source") and not ac.get("destination")
         and (icao24 not in _route_cache or now - _route_cache[icao24].get("cached_at", 0) > ROUTE_CACHE_TTL_SEC)
     ]
     if not candidates:
         return
-    log.info("Enriching routes for %d aircraft", len(candidates))
-    for icao24, ac in candidates:
-        callsign = ac["callsign"].strip()
-        if not callsign:
-            continue
-        try:
-            # OpenSky flight metadata by aircraft (icao24)
-            resp = await client.get(
-                f"{OPENSKY_FLIGHT_URL}/{icao24}",
-                headers=headers,
-                timeout=10.0,
-            )
-            if resp.status_code == 404:
-                _route_cache[icao24] = {"origin": "", "destination": "", "cached_at": now}
-                continue
-            resp.raise_for_status()
-            flights = resp.json()
-            if flights:
-                # Take the most recent flight (last in list)
-                latest = flights[-1]
-                origin = latest.get("estDepartureAirport", "") or latest.get("departureAirport", "")
-                destination = latest.get("estArrivalAirport", "") or latest.get("arrivalAirport", "")
-                if origin or destination:
-                    _route_cache[icao24] = {"origin": origin, "destination": destination, "cached_at": now}
-                    ac["source"] = origin
-                    ac["destination"] = destination
-                    log.debug("Enriched %s (%s): %s -> %s", ac["flightId"], icao24, origin, destination)
-                else:
+    
+    # Limit per cycle
+    candidates = candidates[:_ENRICH_MAX_PER_CYCLE]
+    log.info("Enriching routes for %d aircraft (of %d candidates)", len(candidates), len(candidates))
+    
+    async def enrich_one(icao24: str, ac: dict):
+        async with _ENRICH_SEMAPHORE:
+            callsign = ac["callsign"].strip()
+            if not callsign:
+                return
+            try:
+                resp = await client.get(
+                    f"{OPENSKY_FLIGHT_URL}/{icao24}",
+                    headers=headers,
+                    timeout=10.0,
+                )
+                if resp.status_code == 404:
                     _route_cache[icao24] = {"origin": "", "destination": "", "cached_at": now}
-        except Exception as exc:
-            log.warning("Route enrichment failed for %s: %s", icao24, exc)
-            # Don't cache failures; retry next cycle
+                    return
+                resp.raise_for_status()
+                flights = resp.json()
+                if flights:
+                    latest = flights[-1]
+                    origin = latest.get("estDepartureAirport", "") or latest.get("departureAirport", "")
+                    destination = latest.get("estArrivalAirport", "") or latest.get("arrivalAirport", "")
+                    if origin or destination:
+                        _route_cache[icao24] = {"origin": origin, "destination": destination, "cached_at": now}
+                        ac["source"] = origin
+                        ac["destination"] = destination
+                        log.debug("Enriched %s (%s): %s -> %s", ac["flightId"], icao24, origin, destination)
+                    else:
+                        _route_cache[icao24] = {"origin": "", "destination": "", "cached_at": now}
+            except Exception as exc:
+                log.warning("Route enrichment failed for %s: %s", icao24, exc)
+    
+    # Fire all enrichments concurrently (limited by semaphore)
+    await asyncio.gather(*[enrich_one(icao24, ac) for icao24, ac in candidates], return_exceptions=True)
 
 
 app = FastAPI(title="Plane Tracker Live Feed")
