@@ -54,16 +54,15 @@ const MARKER_ROTATION_OFFSET_DEG = 0;
  * doesn't paint thousands of overlapping SVG badges at once. At/above this zoom
  * every aircraft gets its own marker.
  */
-const CLUSTER_MAX_ZOOM = 6;
-/** Grid cell size (px at zoom 6) used to bucket nearby aircraft into one cluster.
- *  At lower zooms, we enforce a minimum real-world cell size (~50 km) to avoid
- *  over-fragmentation. At zoom 6, 1 px ≈ 611 m (at equator), so 200 px ≈ 122 km.
- */
-const CLUSTER_CELL_SIZE_PX = 200;
-/** Minimum cell size in METRES (real-world) to prevent over-clustering at low zoom. */
-const CLUSTER_MIN_CELL_METRES = 50000; // 50 km
+const CLUSTER_MAX_ZOOM = 7;
+/** Grid cell size (px) used to bucket nearby aircraft into one cluster. */
+const CLUSTER_CELL_SIZE_PX = 80;
+/** Minimum cell size in metres to prevent over-fragmentation at mid zoom. */
+const CLUSTER_MIN_CELL_METRES = 15000; // 15 km
+/** Maximum cell size in metres to prevent gigantic clusters at very low zoom. */
+const CLUSTER_MAX_CELL_METRES = 80000; // 80 km
 /** Cluster marker base radius (px); grows with sqrt(count). */
-const CLUSTER_MARKER_BASE_SIZE_PX = 24;
+const CLUSTER_MARKER_BASE_SIZE_PX = 18;
 
 /**
  * How often follow mode re-centres the map on the plane. The animation loop runs
@@ -510,11 +509,13 @@ export class MapComponent
    * showing the count.
    */
   private syncClusters(visible: Aircraft[], zoom: number): void {
-    // Cell size in map meters: max of (pixel-based at this zoom) and minimum real-world size.
-    // At equator: 1 px = 156543 m / 2^zoom. At zoom 6: 1 px ≈ 611 m.
+    // Cell size in map meters: scale with zoom and clamp to a sensible range.
     const metresPerPixel = 156543 / Math.pow(2, zoom);
     const pixelCellSize = CLUSTER_CELL_SIZE_PX * metresPerPixel;
-    const cellSizeMetres = Math.max(pixelCellSize, CLUSTER_MIN_CELL_METRES);
+    const cellSizeMetres = Math.min(
+      Math.max(pixelCellSize, CLUSTER_MIN_CELL_METRES),
+      CLUSTER_MAX_CELL_METRES,
+    );
     const cellSize = cellSizeMetres / metresPerPixel; // back to pixels for layerPoint math
 
     const cells = new Map<string, { planes: Aircraft[]; center: L.LatLngLiteral }>();
