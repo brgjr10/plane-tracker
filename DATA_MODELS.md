@@ -182,52 +182,49 @@ state = [
 ```
 
 ### `AIRLINE_ROUTES` — Static Enrichment Map
-Duplicated in frontend (`live-flight.service.ts`) and backend (`main.py`).
+Duplicated in frontend (`live-flight.service.ts`) and backend (`main.py`). Both copies
+**must** stay in sync — they are kept identical by hand and verified by `tsc --noEmit` +
+`python -m compileall`.
+
+The map stores **ICAO** (4-letter) airport codes — the natural format for airline
+callsigns (BAW, AFR, DLH are ICAO airline designators). They are translated to **IATA**
+(3-letter) at enrichment time via a shared `ICAO_TO_IATA` lookup, because the frontend's
+`AIRPORTS` table is keyed by IATA. Airports absent from the table are skipped (best-effort).
 
 ```python
 AIRLINE_ROUTES = {
-    "BAW": {"from": "LHR", "to": "JFK"},
-    "DLH": {"from": "FRA", "to": "LAX"},
-    "AFR": {"from": "CDG", "to": "SFO"},
-    "UAL": {"from": "ORD", "to": "LHR"},
-    "AAL": {"from": "DFW", "to": "LHR"},
-    "DAL": {"from": "ATL", "to": "CDG"},
-    "SWA": {"from": "MDW", "to": "LAX"},
-    "QFA": {"from": "SYD", "to": "LAX"},
-    "SIA": {"from": "SIN", "to": "LHR"},
-    "CPA": {"from": "HKG", "to": "SFO"},
-    "KAL": {"from": "ICN", "to": "LAX"},
-    "ANA": {"from": "HND", "to": "SFO"},
-    "JAL": {"from": "NRT", "to": "SFO"},
-    "CCA": {"from": "PEK", "to": "LAX"},
-    "CES": {"from": "PVG", "to": "LAX"},
-    "THA": {"from": "BKK", "to": "LHR"},
-    "MAS": {"from": "KUL", "to": "LHR"},
-    "GIA": {"from": "CGK", "to": "SIN"},
-    "VIR": {"from": "LHR", "to": "JFK"},
-    "EZY": {"from": "LTN", "to": "AMS"},
-    "RYR": {"from": "STN", "to": "BCN"},
-    "WZZ": {"from": "BUD", "to": "LHR"},
-    "IGO": {"from": "DEL", "to": "BOM"},
-    "AIC": {"from": "DEL", "to": "LHR"},
-    "VTI": {"from": "BOM", "to": "DEL"},
-    "SEJ": {"from": "DEL", "to": "BLR"},
-    "GOW": {"from": "BOM", "to": "GOI"},
-    "IAD": {"from": "BLR", "to": "DEL"},
-    "AKJ": {"from": "BOM", "to": "BLR"},
-    "LLR": {"from": "HYD", "to": "BLR"},
-    "SBG": {"from": "IXC", "to": "DEL"},
+    "BAW": ("EGLL", "EHAM"), "DLH": ("EDDF", "EDDM"), "AFR": ("LFPG", "LFMN"),
+    "UAL": ("KORD", "KSFO"), "AAL": ("KDFW", "KLAX"), "DAL": ("KATL", "KLAX"),
+    "SWA": ("KDAL", "KPHX"), "QFA": ("YSSY", "YMML"), "SIA": ("WSSS", "WMKK"),
+    "CPA": ("VHHH", "ZBAA"), "KAL": ("RKSI", "RKPK"), "ANA": ("RJAA", "RJBB"),
+    "JAL": ("RJTT", "RJOO"), "CCA": ("ZBAA", "ZSPD"), "CES": ("ZSPD", "ZGGG"),
+    "THA": ("VTBD", "VTCC"), "MAS": ("WMKK", "WBKK"), "GIA": ("WIII", "WAHH"),
+    "EZY": ("EGKK", "LFPG"), "RYR": ("EIDW", "LIRF"),
+    # ~40 entries total (US majors, Canadian, European, Middle East, Asian, Australian, cargo)
 }
-# ~50 entries total
+
+ICAO_TO_IATA = {
+    "EGLL": "LHR", "EHAM": "AMS", "EDDF": "FRA", "EDDM": "MUC", "LFPG": "CDG",
+    "KORD": "ORD", "KSFO": "SFO", "KDFW": "DFW", "KLAX": "LAX", "KATL": "ATL",
+    "KDAL": "DAL", "KPHX": "PHX", "YSSY": "SYD", "YMML": "MEL", "WSSS": "SIN",
+    "WMKK": "KUL", "VHHH": "HKG", "ZBAA": "PEK", "ZSPD": "SHA", "RKSI": "ICN",
+    "RKPK": "PUS", "RJAA": "HND", "RJBB": "KIX", "RJTT": "HND", "RJOO": "KIX",
+    "VTBD": "BKK", "VTCC": "CNX", "WIII": "CGK", "WAHH": "HLP", "EGKK": "LGW",
+    "EIDW": "DUB", "LIRF": "FCO",
+    # ... one entry per ICAO code that has a seeded IATA counterpart in AIRPORTS
+}
 ```
 
 **Enrichment Logic (both frontend & backend):**
 ```python
 # Extract airline prefix from callsign (e.g. "BAW123" -> "BAW")
-prefix = re.sub(r'\d+$', '', callsign).upper()
-if prefix in AIRLINE_ROUTES:
-    aircraft["source"] = AIRLINE_ROUTES[prefix]["from"]
-    aircraft["destination"] = AIRLINE_ROUTES[prefix]["to"]
+prefix = re.match(r"^([A-Z]{2,3})\d", callsign.upper())
+if prefix and prefix.group(1) in AIRLINE_ROUTES:
+    icao_origin, icao_dest = AIRLINE_ROUTES[prefix.group(1)]
+    origin = ICAO_TO_IATA.get(icao_origin, icao_origin)
+    dest = ICAO_TO_IATA.get(icao_dest, icao_dest)
+    aircraft["source"] = origin
+    aircraft["destination"] = dest
 ```
 
 ---

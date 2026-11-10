@@ -259,7 +259,7 @@ const fleet = simulator.sample(1705312200000); // Jan 15 2026 10:30:00 UTC
 ```
 
 ### 3D View Performance
-- `VISUAL_TIME_SCALE = 0.15` — reduces effective speed for tile streaming
+- `VISUAL_TIME_SCALE = 1.0` — samples the simulator at real time. The 0.15 slowdown was a workaround for hypersonic base speeds; with realistic 420–530 kts the tile grid (anchored to true lat/lon) loads at a natural pace, so no artificial slowdown is needed.
 - Terrain tiles loaded in `TerrainManager` with priority queue by distance
 - Max concurrent tile loads: 8 (configurable)
 - LOD: tiles beyond 50km use lower zoom
@@ -300,13 +300,14 @@ const fleet = simulator.sample(1705312200000); // Jan 15 2026 10:30:00 UTC
 
 | Issue | Location | Severity |
 |-------|----------|----------|
-| `AIRLINE_ROUTES` duplicated in frontend + backend | `live-flight.service.ts`, `main.py` | Medium |
+| `AIRLINE_ROUTES` duplicated in frontend + backend (stores ICAO; both copies share `ICAO_TO_IATA`) | `live-flight.service.ts`, `main.py` | Medium |
 | Live flights have no `aircraft` type | OpenSky limitation | Low |
-| `progress` always 0 for live → no route overlay | `LiveFlightService` | Medium |
+| `progress` always 0 for live → route overlay only draws a static origin→plane→destination line (no flown/remaining split) | `LiveFlightService` | Low |
 | `eta` never populated (Phase 2) | `flight-simulator.service.ts` | Low |
 | Model offsets hardcoded for current OBJ | `flight-view-3d.component.ts` | Low |
 | No tests for Three.js components | `flight-view-3d/three/*.ts` | Medium |
 | Cluster count badge not accessible | `map.component.ts` | Low |
+| `VISUAL_TIME_SCALE` / `REFERENCE_SPEED_KTS` are visual tuning constants, not derived from physics | `flight-view-3d.component.ts` | Low |
 
 ## Useful Commands Cheat Sheet
 

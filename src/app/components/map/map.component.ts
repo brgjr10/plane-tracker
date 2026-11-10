@@ -185,6 +185,9 @@ export class MapComponent
   /** True when the live WebSocket feed is connected. */
   readonly feedConnected = this.liveFlights.connected;
 
+  /** Live feed error (set when reconnect retries are exhausted), or null. */
+  readonly feedError = this.liveFlights.feedError;
+
   /** Live data for the selected aircraft, or null when none is selected. */
   readonly selectedAircraft = computed<Aircraft | null>(() => {
     this.clock(); // refresh periodically while the panel is open
@@ -986,6 +989,11 @@ export class MapComponent
   /** Toggle hiding grounded (on_ground) aircraft from the map. */
   toggleHideGrounded(): void {
     this.hideGrounded.set(!this.hideGrounded());
+  }
+
+  /** Dismiss the live-feed error banner. */
+  dismissFeedError(): void {
+    this.liveFlights.clearFeedError();
   }
 
   ngOnInit(): void {}

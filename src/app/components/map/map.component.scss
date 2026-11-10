@@ -86,4 +86,48 @@
       user-select: none;
     }
   }
+
+  // Dismissible live-feed error banner. Shown when the WebSocket feed is
+  // disconnected and reconnect retries are exhausted.
+  &__banner {
+    position: absolute;
+    top: var(--space-4);
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 25; /* above the toggle and status overlays */
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.5rem 1rem;
+    border: 1px solid #f85149;
+    border-radius: 6px;
+    background: #fdecec;
+    color: #8a1f1f;
+    font-size: 0.85rem;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+
+    &__message {
+      margin: 0;
+      flex: 1;
+      text-align: center;
+    }
+
+    &__dismiss {
+      flex: 0 0 auto;
+      padding: 0.125rem 0.5rem;
+      border: none;
+      border-radius: 4px;
+      background: transparent;
+      color: #f85149;
+      font-size: 1.25rem;
+      font-weight: 700;
+      line-height: 1;
+      cursor: pointer;
+
+      &:hover {
+        background: rgba(248, 81, 73, 0.15);
+      }
+    }
+  }
 }

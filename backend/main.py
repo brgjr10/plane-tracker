@@ -5,6 +5,7 @@ import os
 import re
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Dict, Optional
 
 import httpx
@@ -26,6 +27,24 @@ FALLBACK_POLL_INTERVAL_SEC = 10.0
 OPENSKY_CLIENT_ID = os.getenv("OPENSKY_CLIENT_ID", "")
 OPENSKY_CLIENT_SECRET = os.getenv("OPENSKY_CLIENT_SECRET", "")
 
+# Built Angular frontend. A clean clone won't have this until `npm run build` runs.
+FRONTEND_DIST = Path("/app/dist/plane-tracker/browser")
+FRONTEND_INDEX = FRONTEND_DIST / "index.html"
+PLACEHOLDER_HTML = Path(__file__).resolve().parent / "static" / "frontend-not-built.html"
+FRONTEND_BUILT = FRONTEND_INDEX.exists()
+
+if not FRONTEND_BUILT:
+    log.warning(
+        "\n"
+        "================================================================\n"
+        "Frontend not built: %s is missing.\n"
+        "The Angular frontend was not built, so UI routes will serve a\n"
+        "placeholder page instead of the app.\n"
+        "Fix: run `npm run build` in the repo root, then restart the backend.\n"
+        "================================================================\n",
+        FRONTEND_INDEX,
+    )
+
 # Fallback ADS-B providers (readsb-style). OpenSky is tried first; on failure/rate-limit
 # we fall back in order. airplanes.live requires explicit opt-in because its public API
 # may require coordination/credentials; set AIRPLANES_LIVE_URL to enable it.
@@ -37,8 +56,30 @@ AIRPLANES_LIVE_URL = os.getenv("AIRPLANES_LIVE_URL", "").strip()
 _token: Optional[str] = None
 _token_expires_at: float = 0.0
 
-# Static airline route mapping: callsign prefix -> (origin, destination) IATA codes.
-# Covers major commercial carriers. Extend as needed.
+# Static airline route mapping: callsign prefix -> (origin, destination) airport
+# codes. The codes here are **ICAO** (4-letter, e.g. EGLL), which is what airline
+# callsigns naturally carry (BAW, AFR, DLH are ICAO airline designators).
+#
+# They are resolved against the frontend's IATA-keyed AIRPORTS table at render
+# time via ICAO_TO_IATA below. Only airports present in AIRPORTS can draw a route;
+# the rest are silently skipped (best-effort). Both copies of this table must
+# stay in sync with the one in src/app/services/live-flight.service.ts.
+ICAO_TO_IATA = {
+    "KDFW": "DFW", "KLAX": "LAX", "KATL": "ATL", "KORD": "ORD", "KSFO": "SFO",
+    "KDAL": "DAL", "KPHX": "PHX", "KJFK": "JFK", "KSEA": "SEA", "KPDX": "PDX",
+    "KDEN": "DEN", "KLAS": "LAS", "KFLL": "FLL", "KLGA": "LGA", "PHNL": "HNL", "KOGG": "OGG",
+    "CYYZ": "YYZ", "CYVR": "YVR", "CYYC": "YYC",
+    "EGLL": "LHR", "EHAM": "AMS", "LFPG": "CDG", "LFMN": "MRS", "EDDF": "FRA", "EDDM": "MUC",
+    "LEMD": "MAD", "EIDW": "DUB", "LIRF": "FCO", "EGKK": "LGW", "ESSA": "ARN", "EKCH": "CPH",
+    "EFHK": "HEL", "EFVA": "TMP", "LEBL": "BCN", "LEPA": "PAQ",
+    "OMDB": "DXB", "OTHH": "DOH", "OMAA": "MCT",
+    "WSSS": "SIN", "WMKK": "KUL", "VHHH": "HKG", "ZBAA": "PEK", "RJAA": "HND", "RJBB": "KIX",
+    "RJTT": "HND", "RJOO": "KIX", "RKSI": "ICN", "RKPK": "PUS", "ZGGG": "CAN", "ZSPD": "SHA",
+    "VTBD": "BKK", "VTCC": "CNX", "WIII": "CGK", "WAHH": "HLP",
+    "YSSY": "SYD", "YMML": "MEL", "YBBN": "BNE",
+    "KMEM": "MEM", "KIND": "IND", "KSDF": "SDF", "KONT": "ONT",
+}
+
 AIRLINE_ROUTES = {
     # US majors
     "AAL": ("KDFW", "KLAX"), "DAL": ("KATL", "KLAX"), "UAL": ("KORD", "KSFO"),
@@ -66,7 +107,12 @@ AIRLINE_ROUTES = {
 
 
 def enrich_routes_static(fleet: Dict[str, dict]) -> None:
-    """Populate source/destination from static airline route map based on callsign prefix."""
+    """Populate source/destination from static airline route map based on callsign prefix.
+
+    Emits IATA codes (3-letter) so the frontend's IATA-keyed AIRPORTS table can
+    resolve them into route geometry. Airports not present in the table are
+    skipped — enrichment is best-effort, not a hard failure.
+    """
     for icao24, ac in fleet.items():
         callsign = ac.get("callsign", "").strip().upper()
         if not callsign:
@@ -78,7 +124,9 @@ def enrich_routes_static(fleet: Dict[str, dict]) -> None:
             continue
         airline = match.group(1)
         if airline in AIRLINE_ROUTES:
-            origin, dest = AIRLINE_ROUTES[airline]
+            originIcao, destIcao = AIRLINE_ROUTES[airline]
+            origin = ICAO_TO_IATA.get(originIcao, originIcao)
+            dest = ICAO_TO_IATA.get(destIcao, destIcao)
             ac["source"] = origin
             ac["destination"] = dest
 
@@ -293,6 +341,11 @@ async def poll_flights():
 
 @app.on_event("startup")
 async def startup():
+    if not OPENSKY_CLIENT_ID or not OPENSKY_CLIENT_SECRET:
+        log.warning(
+            "OPENSKY_CLIENT_ID or OPENSKY_CLIENT_SECRET is not set — polling OpenSky unauthenticated "
+            "(rate-limited). Set both env vars for authenticated access."
+        )
     asyncio.create_task(poll_flights())
 
 
@@ -331,7 +384,14 @@ async def flights_rest():
 
 # Serve the built Angular frontend
 # Static files first (assets, index.html for root). Mount at root with html=True.
-app.mount("/", StaticFiles(directory="/app/dist/plane-tracker/browser", html=True), name="static")
+# A clean clone has no build output, so mount a placeholder route instead of 404ing.
+if FRONTEND_BUILT:
+    app.mount("/", StaticFiles(directory=str(FRONTEND_DIST), html=True), name="static")
+else:
+
+    @app.get("/")
+    async def frontend_not_built():
+        return FileResponse(PLACEHOLDER_HTML)
 
 # Middleware: on 404 for non-asset/API paths, serve index.html (SPA fallback)
 from starlette.responses import FileResponse
@@ -347,7 +407,9 @@ class SPAMiddleware(BaseHTTPMiddleware):
             if path.startswith(("api/", "ws/", "chunk-", "main-", "polyfills-", "styles-", "logo.", "markers/", "favicon.", "assets/")):
                 return response
             # Serve index.html for client-side routes
-            return FileResponse("/app/dist/plane-tracker/browser/index.html")
+            if FRONTEND_BUILT:
+                return FileResponse(FRONTEND_INDEX)
+            return FileResponse(PLACEHOLDER_HTML)
         return response
 
 app.add_middleware(SPAMiddleware)
