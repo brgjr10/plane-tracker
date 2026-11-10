@@ -60,6 +60,15 @@ const HEIGHT_PX = 256;
 
 /** Y the terrain group sits at before any heightmap has loaded (matches the old look). */
 export const TERRAIN_BASE_Y = -20;
+/**
+ * Per-tile Y offset that breaks coplanarity between adjacent tiles' overlap
+ * regions (see the mesh setup and setView). Elevation tiles quantize to
+ * integer metres, so matching boundary heights put two tiles exactly
+ * coplanar → z-fighting ("tears") down every seam. 0.01 units ≈ 8 mm of real
+ * elevation — invisible, but far exceeds depth precision even at the grazing
+ * angles the orbit camera allows.
+ */
+const Z_FIGHT_EPS = 0.01;
 
 /** Day/night terrain tints — imagery stays true-colour by day, cools + dims at night. */
 const TINT_DAY = new THREE.Color('#ffffff');
@@ -224,7 +233,7 @@ export function createTileTerrain(
   const tintColor = theme === 'day' ? TINT_DAY.clone() : TINT_NIGHT.clone();
   let currentTheme: MapTheme = theme;
 
-// --- Build the fixed tile pool -------------------------------------------
+  // --- Build the fixed tile pool -------------------------------------------
   const tiles: Tile[] = [];
 
   for (let i = 0; i < (GRID_RADIUS * 2 + 1) ** 2; i++) {
@@ -260,6 +269,12 @@ export function createTileTerrain(
     // tiles (edge height/normal sampling can differ at shared borders).
     mesh.scale.set(1.002, 1, 1.002);
     mesh.frustumCulled = false;
+    // The overlap makes adjacent tiles coincident at every seam. Elevation
+    // tiles quantize to integer metres, so matching boundary heights put two
+    // tiles exactly coplanar → z-fighting ("tears") down each seam. A tiny
+    // per-tile Y offset, flipped by (tileX+tileY) parity, means neighbours are
+    // never coplanar while the overlap still bridges the quantization step.
+    mesh.position.y = 0;
     group.add(mesh);
 
     tiles.push({
@@ -510,6 +525,8 @@ export function createTileTerrain(
       const dty = tile.tileY + 0.5 - frac.y;
       tile.mesh.position.x = -dtx * TILE_UNITS;
       tile.mesh.position.z = -dty * TILE_UNITS;
+      // Parity Y offset (see mesh setup): keeps adjacent tiles from z-fighting.
+      tile.mesh.position.y = ((tile.tileX + tile.tileY) & 1) ? Z_FIGHT_EPS : -Z_FIGHT_EPS;
     }
 
     // Drop the whole group so the ground under the aircraft sits the right AGL
