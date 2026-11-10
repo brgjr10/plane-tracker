@@ -479,6 +479,7 @@ export class MapComponent
       for (const marker of this.markers.values()) {
         marker.setMap(null);
       }
+      this.markers.clear();
       this.clusteredFlightIds.clear();
       for (const plane of visible) {
         this.clusteredFlightIds.add(plane.flightId);
@@ -490,14 +491,17 @@ export class MapComponent
       }
       this.clusterMarkers.clear();
       this.clusterLayer.clearLayers();
+      this.clusteredFlightIds.clear();
       this.syncIndividualMarkers(visible);
     }
 
     // Drop markers for flights no longer visible (kept in the map for reuse).
-    for (const [flightId, marker] of this.markers) {
-      if (!visible.some((p) => p.flightId === flightId)) {
-        marker.setMap(null);
-        this.markers.delete(flightId);
+    if (!clustering) {
+      for (const [flightId, marker] of this.markers) {
+        if (!visible.some((p) => p.flightId === flightId)) {
+          marker.setMap(null);
+          this.markers.delete(flightId);
+        }
       }
     }
   }
