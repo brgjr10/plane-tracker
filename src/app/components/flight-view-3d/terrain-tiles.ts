@@ -275,7 +275,7 @@ export function createTileTerrain(
       positions[vi++] = -SKIRT_DEPTH;
       positions[vi++] = -half;
       uvs[ui++] = ux;
-      uvs[ui++] = 1;
+      uvs[ui++] = 0; // match mirrored texture: bottom edge = V=0
     }
     // Top edge (z = seg, north)
     for (let x = 0; x < seg; x++) {
@@ -284,7 +284,7 @@ export function createTileTerrain(
       positions[vi++] = -SKIRT_DEPTH;
       positions[vi++] = half;
       uvs[ui++] = ux;
-      uvs[ui++] = 0;
+      uvs[ui++] = 1; // match mirrored texture: top edge = V=1
     }
     // Left edge (x = 0, west) — note: world east = -X, so west = +X
     for (let z = 0; z < seg; z++) {
@@ -292,7 +292,7 @@ export function createTileTerrain(
       positions[vi++] = -half;
       positions[vi++] = -SKIRT_DEPTH;
       positions[vi++] = (uz - 0.5) * TILE_UNITS;
-      uvs[ui++] = 0;
+      uvs[ui++] = 1; // match mirrored texture: left edge = U=1
       uvs[ui++] = 1 - uz;
     }
     // Right edge (x = seg, east)
@@ -301,7 +301,7 @@ export function createTileTerrain(
       positions[vi++] = half;
       positions[vi++] = -SKIRT_DEPTH;
       positions[vi++] = (uz - 0.5) * TILE_UNITS;
-      uvs[ui++] = 1;
+      uvs[ui++] = 0; // match mirrored texture: right edge = U=0
       uvs[ui++] = 1 - uz;
     }
 
@@ -320,20 +320,22 @@ export function createTileTerrain(
     // Skirt triangles: for each edge, connect each top edge vertex to its
     // corresponding skirt vertex and the next top edge vertex.
     // Each edge has seg segments → seg skirt vertices → seg triangles.
+    // Use consistent winding: (topIdx, nextTop, skirtIdx) for all edges
+    // to ensure normals point outward/downward correctly.
     const skirtBase = topCount;
     // Bottom edge (south, z=0): top vertices 0..seg, skirt vertices 0..seg-1
     for (let x = 0; x < seg; x++) {
       const topIdx = x;
       const nextTop = x + 1;
       const skirtIdx = skirtBase + x;
-      indices.push(topIdx, skirtIdx, nextTop);
+      indices.push(topIdx, nextTop, skirtIdx);
     }
     // Top edge (north, z=seg): top vertices seg*(seg+1) .. seg*(seg+1)+seg
     for (let x = 0; x < seg; x++) {
       const topIdx = seg * (seg + 1) + x;
       const nextTop = seg * (seg + 1) + x + 1;
       const skirtIdx = skirtBase + seg + x;
-      indices.push(topIdx, nextTop, skirtIdx); // winding order flipped for correct normal
+      indices.push(topIdx, nextTop, skirtIdx);
     }
     // Left edge (west, x=0): top vertices 0, seg+1, 2*(seg+1), ..., seg*(seg+1)
     for (let z = 0; z < seg; z++) {
@@ -347,7 +349,7 @@ export function createTileTerrain(
       const topIdx = z * (seg + 1) + seg;
       const nextTop = (z + 1) * (seg + 1) + seg;
       const skirtIdx = skirtBase + 3 * seg + z;
-      indices.push(topIdx, skirtIdx, nextTop);
+      indices.push(topIdx, nextTop, skirtIdx);
     }
 
     const geometry = new THREE.BufferGeometry();
