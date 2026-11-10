@@ -55,10 +55,15 @@ const MARKER_ROTATION_OFFSET_DEG = 0;
  * every aircraft gets its own marker.
  */
 const CLUSTER_MAX_ZOOM = 6;
-/** Grid cell size (px at current zoom) used to bucket nearby aircraft into one cluster. */
-const CLUSTER_CELL_SIZE_PX = 90;
-/** Cluster marker radius (px). */
-const CLUSTER_MARKER_SIZE_PX = 40;
+/** Grid cell size (px at zoom 6) used to bucket nearby aircraft into one cluster.
+ *  At lower zooms, we enforce a minimum real-world cell size (~50 km) to avoid
+ *  over-fragmentation. At zoom 6, 1 px ≈ 611 m (at equator), so 200 px ≈ 122 km.
+ */
+const CLUSTER_CELL_SIZE_PX = 200;
+/** Minimum cell size in METRES (real-world) to prevent over-clustering at low zoom. */
+const CLUSTER_MIN_CELL_METRES = 50000; // 50 km
+/** Cluster marker base radius (px); grows with sqrt(count). */
+const CLUSTER_MARKER_BASE_SIZE_PX = 24;
 
 /**
  * How often follow mode re-centres the map on the plane. The animation loop runs
@@ -505,7 +510,13 @@ export class MapComponent
    * showing the count.
    */
   private syncClusters(visible: Aircraft[], zoom: number): void {
-    const cellSize = CLUSTER_CELL_SIZE_PX / Math.pow(2, zoom);
+    // Cell size in map meters: max of (pixel-based at this zoom) and minimum real-world size.
+    // At equator: 1 px = 156543 m / 2^zoom. At zoom 6: 1 px ≈ 611 m.
+    const metresPerPixel = 156543 / Math.pow(2, zoom);
+    const pixelCellSize = CLUSTER_CELL_SIZE_PX * metresPerPixel;
+    const cellSizeMetres = Math.max(pixelCellSize, CLUSTER_MIN_CELL_METRES);
+    const cellSize = cellSizeMetres / metresPerPixel; // back to pixels for layerPoint math
+
     const cells = new Map<string, { planes: Aircraft[]; center: L.LatLngLiteral }>();
 
     for (const plane of visible) {
@@ -559,32 +570,28 @@ export class MapComponent
     position: L.LatLngLiteral,
     count: number,
   ): L.Marker {
+    const size = CLUSTER_MARKER_BASE_SIZE_PX + Math.sqrt(count) * 4;
     const icon = L.divIcon({
       className: 'cluster-marker',
       html: `<div class="cluster-marker__count">${count}</div>`,
-      iconSize: [CLUSTER_MARKER_SIZE_PX, CLUSTER_MARKER_SIZE_PX],
-      iconAnchor: [
-        CLUSTER_MARKER_SIZE_PX / 2,
-        CLUSTER_MARKER_SIZE_PX / 2,
-      ],
+      iconSize: [size, size],
+      iconAnchor: [size / 2, size / 2],
     }) as unknown as L.DivIcon;
     return L.marker(position as L.LatLngExpression, {
       icon,
       interactive: false,
-      zIndexOffset: 1000, // draw above individual aircraft markers
+      zIndexOffset: 1000,
     });
   }
 
-  /** Update the count shown on an existing cluster marker. */
+  /** Update an existing cluster marker's count and size. */
   private updateClusterMarkerCount(marker: L.Marker, count: number): void {
-    const el = marker.getElement();
-    if (!el) {
-      return;
-    }
-    const countEl = el.querySelector('.cluster-marker__count');
-    if (countEl) {
-      countEl.textContent = String(count);
-    }
+    const size = CLUSTER_MARKER_BASE_SIZE_PX + Math.sqrt(count) * 4;
+    const icon = marker.getIcon() as L.DivIcon;
+    icon.options.iconSize = [size, size];
+    icon.options.iconAnchor = [size / 2, size / 2];
+    icon.options.html = `<div class="cluster-marker__count">${count}</div>`;
+    marker.setIcon(icon);
   }
 
   /**
