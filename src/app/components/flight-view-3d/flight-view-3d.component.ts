@@ -296,14 +296,21 @@ export class FlightView3dComponent implements AfterViewInit, OnDestroy {
     const width = this.host.clientWidth || window.innerWidth;
     const height = this.host.clientHeight || window.innerHeight;
 
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer = new THREE.WebGLRenderer({
+      canvas,
+      antialias: true,
+      powerPreference: 'high-performance',
+    });
+    this.renderer.setPixelRatio(window.devicePixelRatio);
     this.renderer.setSize(width, height, false);
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.0;
 
     this.scene = new THREE.Scene();
-    this.scene.fog = new THREE.Fog(0x000000, 90, 360);
+    this.scene.fog = new THREE.Fog(0x000000, 400, 1800);
 
-    this.camera = new THREE.PerspectiveCamera(55, width / height, 0.1, 2000);
+    this.camera = new THREE.PerspectiveCamera(55, width / height, 0.1, 5000);
     // Start behind + above the aircraft (third-person); the chase loop keeps it there.
     this.camera.position.set(0, CHASE_HEIGHT, -CHASE_DISTANCE);
 
@@ -332,8 +339,8 @@ export class FlightView3dComponent implements AfterViewInit, OnDestroy {
     this.controls = new OrbitControls(this.camera, canvas);
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.08;
-    this.controls.minDistance = 6;
-    this.controls.maxDistance = 70;
+    this.controls.minDistance = 4;
+    this.controls.maxDistance = 200;
     this.controls.maxPolarAngle = Math.PI * 0.495; // stay above the ground
     this.controls.target.set(0, 0, 0);
     // The moment the user grabs the camera, stop chasing and hand over control.

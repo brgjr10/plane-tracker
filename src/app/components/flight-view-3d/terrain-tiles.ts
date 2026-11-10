@@ -39,17 +39,16 @@ import {
  * rendered as a persistent credit line in the component template.
  */
 
-/** Zoom level: z13 tiles give 2× sharper satellite/relief detail (~100 m/px).
- *  A 13×13 grid (radius 6) keeps similar ground coverage (~1.8 km at mid-lats). */
-export const TILE_ZOOM = 13;
-/** Grid radius in tiles from the centre (6 → a 13×13 grid). */
-const GRID_RADIUS = 6;
+/** Zoom level for imagery/elevation tiles (higher = sharper). */
+export const TILE_ZOOM = 14;
+/** Grid radius in tiles from the centre (8 → a 17×17 grid). */
+const GRID_RADIUS = 8;
 /** Vertex subdivision per tile edge (heightmaps are 256px; 128 samples them cleanly). */
 const TILE_SEGMENTS = 128;
-/** World units per tile edge. 5 tiles → a 400-unit grid; the outer ring fades into fog. */
+/** World units per tile edge. */
 const TILE_UNITS = 80;
 /** Height relief multiplier over the true horizontal scale (drama vs. realism knob). */
-const VERTICAL_EXAGGERATION = 3;
+const VERTICAL_EXAGGERATION = 2.4;
 /** Clamp for how far (world units) the aircraft floats above local ground. */
 const MIN_CAM_AGL_UNITS = 8;
 /** Cap so cruising at 35,000 ft keeps the terrain framed rather than tiny + far below. */
