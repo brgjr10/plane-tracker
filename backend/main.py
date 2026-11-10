@@ -18,10 +18,10 @@ log = logging.getLogger("planetracker")
 OPENSKY_URL = "https://opensky-network.org/api/states/all"
 OPENSKY_FLIGHT_URL = "https://opensky-network.org/api/flights/aircraft"
 OPENSKY_TOKEN_URL = "https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token"
-BASE_POLL_INTERVAL_SEC = 30.0
-MAX_POLL_INTERVAL_SEC = 180.0
-ROUTE_ENRICH_INTERVAL_SEC = 300.0  # 5 min
-ROUTE_CACHE_TTL_SEC = 86400.0  # 24h
+BASE_POLL_INTERVAL_SEC = 10.0
+MAX_POLL_INTERVAL_SEC = 120.0
+OPENSKY_POLL_INTERVAL_SEC = 60.0
+FALLBACK_POLL_INTERVAL_SEC = 10.0
 
 OPENSKY_CLIENT_ID = os.getenv("OPENSKY_CLIENT_ID", "")
 OPENSKY_CLIENT_SECRET = os.getenv("OPENSKY_CLIENT_SECRET", "")
@@ -238,8 +238,7 @@ async def poll_flights():
         sources.append(("airplanes.live", lambda c: fetch_readsb(c, AIRPLANES_LIVE_URL, "airplanes.live")))
 
     async with httpx.AsyncClient(timeout=20.0, headers={"Accept": "application/json"}) as client:
-        # Initial delay to respect poll interval and avoid immediate rate-limit
-        await asyncio.sleep(BASE_POLL_INTERVAL_SEC)
+        # No initial delay — first poll immediate for fast startup
         while True:
             new_fleet: Optional[Dict[str, dict]] = None
             used_source = None
@@ -262,7 +261,6 @@ async def poll_flights():
             if new_fleet and used_source:
                 fleet.clear()
                 fleet.update(new_fleet)
-                # Enrich with static airline route mapping (callsign prefix -> origin/dest)
                 enrich_routes_static(fleet)
                 payload = {
                     "type": "fleet",
@@ -280,7 +278,11 @@ async def poll_flights():
                         dead.append(ws)
                 for ws in dead:
                     clients.discard(ws)
-                backoff = BASE_POLL_INTERVAL_SEC
+                # Adaptive interval: fast for fallbacks, slow for OpenSky
+                if used_source == "OpenSky":
+                    backoff = OPENSKY_POLL_INTERVAL_SEC
+                else:
+                    backoff = FALLBACK_POLL_INTERVAL_SEC
                 log.info("Polled %s: %d aircraft, %d clients", used_source, len(fleet), len(clients))
             else:
                 log.warning("All flight sources failed: %s", "; ".join(errors) or "unknown")
