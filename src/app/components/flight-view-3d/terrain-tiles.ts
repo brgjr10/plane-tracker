@@ -153,10 +153,10 @@ function patchMaterial(
       varying vec3 vWorldPos;
 
       // Decode Terrarium RGB (raw 0..1 bytes) → elevation in metres.
-      // Sample directly; texture uses ClampToEdgeWrapping so edge taps clamp
-      // to the tile's edge texel, matching adjacent tiles at boundaries.
+      // Sample directly; texture uses ClampToEdgeWrapping so edge taps sample
+      // across tile boundaries continuously, matching adjacent tiles.
       float sampleElevM(vec2 uvh) {
-        vec2 uv = clamp(uvh, vec2(0.0), vec2(1.0));
+        vec2 uv = uvh;
         vec3 e = texture2D(uHeightMap, uv).rgb * 255.0;
         return (e.r * 256.0 + e.g + e.b / 256.0) - 32768.0;
       }
