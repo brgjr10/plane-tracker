@@ -54,13 +54,13 @@ const MARKER_ROTATION_OFFSET_DEG = 0;
  * doesn't paint thousands of overlapping SVG badges at once. At/above this zoom
  * every aircraft gets its own marker.
  */
-const CLUSTER_MAX_ZOOM = 7;
+const CLUSTER_MAX_ZOOM = 8;
 /** Grid cell size (px) used to bucket nearby aircraft into one cluster. */
-const CLUSTER_CELL_SIZE_PX = 80;
-/** Minimum cell size in metres to prevent over-fragmentation at mid zoom. */
-const CLUSTER_MIN_CELL_METRES = 15000; // 15 km
-/** Maximum cell size in metres to prevent gigantic clusters at very low zoom. */
-const CLUSTER_MAX_CELL_METRES = 80000; // 80 km
+const CLUSTER_CELL_SIZE_PX = 160;
+/** Minimum cell size in metres to keep cells from fragmenting at mid zoom. */
+const CLUSTER_MIN_CELL_METRES = 60000; // 60 km
+/** Maximum cell size in metres to prevent overly coarse clusters. */
+const CLUSTER_MAX_CELL_METRES = 250000; // 250 km
 /** Cluster marker base radius (px); grows with sqrt(count). */
 const CLUSTER_MARKER_BASE_SIZE_PX = 18;
 
