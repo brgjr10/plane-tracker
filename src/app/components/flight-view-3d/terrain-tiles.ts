@@ -40,7 +40,7 @@ import {
  */
 
 /** Zoom level for imagery/elevation tiles (higher = sharper). */
-export const TILE_ZOOM = 17;
+export const TILE_ZOOM = 15;
 /** Grid radius in tiles from the centre (8 → a 17×17 grid). */
 const GRID_RADIUS = 16;
 /** Vertex subdivision per tile edge (heightmaps are 256px; 128 samples them cleanly). */
