@@ -124,11 +124,27 @@ export const SEED_FLIGHTS: FlightSeed[] = [
 ];
 
 /**
- * Resolve an IATA airport code to its city name for display (e.g. 'HYD' →
- * 'Hyderabad'). Falls back to the code itself if it isn't a seeded airport, so
- * the UI never shows a blank. In a live system this lookup would come from an
- * airports reference service; here it's the static seed map.
+ * Resolve an aircraft type string to a photo path for the hover card.
+ * Falls back to the default aircraft image if the specific type has no photo.
  */
+export function photoForAircraft(aircraftType: string): string {
+  const t = aircraftType.toLowerCase();
+  if (t.includes('a380')) return 'aircraft/UK-777.jpg';
+  if (t.includes('a350')) return 'aircraft/UK-777.jpg';
+  if (t.includes('a340')) return 'aircraft/UK-777.jpg';
+  if (t.includes('a330')) return 'aircraft/UK-777.jpg';
+  if (t.includes('a321')) return 'aircraft/UK-777.jpg';
+  if (t.includes('a320')) return 'aircraft/6E-201.jpg';
+  if (t.includes('a319')) return 'aircraft/6E-201.jpg';
+  if (t.includes('787')) return 'aircraft/AI-505.jpg';
+  if (t.includes('777')) return 'aircraft/AI-505.jpg';
+  if (t.includes('767')) return 'aircraft/AI-505.jpg';
+  if (t.includes('757')) return 'aircraft/AI-505.jpg';
+  if (t.includes('747')) return 'aircraft/AI-505.jpg';
+  if (t.includes('737')) return 'aircraft/AI-505.jpg';
+  return 'aircraft/UK-777.jpg';
+}
+
 export function cityForAirport(code: string): string {
   return AIRPORTS[code]?.city ?? code;
 }

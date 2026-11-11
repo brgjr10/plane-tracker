@@ -55,6 +55,36 @@ AIRPLANES_LIVE_URL = os.getenv("AIRPLANES_LIVE_URL", "").strip()
 # OAuth2 access token cache (Bearer token expires after 30 minutes)
 _token: Optional[str] = None
 _token_expires_at: float = 0.0
+_TOKEN_LIFETIME_SEC = 1800.0
+
+
+async def get_access_token(client: httpx.AsyncClient) -> Optional[str]:
+    """Fetch (and cache) an OAuth2 Bearer token from the OpenSky auth server.
+
+    OpenSky's API requires an OAuth2 client-credentials token for `/api/states/all`.
+    The token expires after 30 minutes, so we cache and refresh proactively.
+    """
+    global _token, _token_expires_at
+    now = time.monotonic()
+    if _token and now < _token_expires_at - 60:
+        return _token
+    resp = await client.post(
+        OPENSKY_TOKEN_URL,
+        data={
+            "grant_type": "client_credentials",
+            "client_id": OPENSKY_CLIENT_ID,
+            "client_secret": OPENSKY_CLIENT_SECRET,
+        },
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    token = data.get("access_token")
+    expires_in = float(data.get("expires_in") or _TOKEN_LIFETIME_SEC)
+    if token:
+        _token = token
+        _token_expires_at = now + expires_in
+    return token
 
 # Static airline route mapping: callsign prefix -> (origin, destination) airport
 # codes. The codes here are **ICAO** (4-letter, e.g. EGLL), which is what airline
