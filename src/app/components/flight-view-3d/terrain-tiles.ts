@@ -39,7 +39,7 @@ import {
  * rendered as a persistent credit line in the component template.
  */
 
-/** Zoom level for imagery/elevation tiles (higher = sharper). */
+ /** Zoom level for imagery/elevation tiles (higher = sharper). */
 export const TILE_ZOOM = 15;
 /** Grid radius in tiles from the centre (16 → a 33×33 grid, ±1280 units). */
 const GRID_RADIUS = 16;
@@ -233,30 +233,140 @@ export function createTileTerrain(
   const tintColor = theme === 'day' ? TINT_DAY.clone() : TINT_NIGHT.clone();
   let currentTheme: MapTheme = theme;
 
-  // --- Build the fixed tile pool -------------------------------------------
+      // --- Build the fixed tile pool -------------------------------------------
   const tiles: Tile[] = [];
 
   for (let i = 0; i < (GRID_RADIUS * 2 + 1) ** 2; i++) {
-    // A plain subdivided plane, rotated to lie flat in the XZ plane with Y up.
-    // Three.js PlaneGeometry's vertex layout, UVs and winding are identical to
-    // the hand-rolled mesh that was here before (verified: same positions/UVs/
-    // triangle winding), so the shader's `uv` sampling and the imagery mapping
-    // are unchanged. No edge skirts: they were a 20 000-unit-deep vertical
-    // quad at every tile boundary, which is exactly the "90° wall" artifact
-    // the user reported — see the fix notes below.
-    const geometry = new THREE.PlaneGeometry(
-      TILE_UNITS,
-      TILE_UNITS,
-      TILE_SEGMENTS,
-      TILE_SEGMENTS,
-    );
-    geometry.rotateX(-Math.PI / 2); // lie flat: +Y is up, uv still spans the tile
+  // A subdivided plane, rotated to lie flat in the XZ plane with Y up.
+  // Three.js PlaneGeometry's vertex layout, UVs and winding are identical to
+  // the hand-rolled mesh that was here before (verified: same positions/UVs/
+  // triangle winding), so the shader's `uv` sampling and the imagery mapping
+  // are unchanged. Add vertical skirt walls (~5 world units deep) along each
+  // tile edge. This prevents the 90° wall artifact while keeping the shader
+  // displacement seamless across tile boundaries (ClampToEdgeWrapping).
+ 
+// ---------- combined BufferGeometry: main plane + vertical skirt walls ----------
+      const SKIRT_DEPTH = 5.0;
+      const segN = TILE_SEGMENTS;
+      const segPlusOne = segN + 1;
+
+      // Main plane: TILE_UNITS × TILE_UNITS grid, XZ plane (Y up after rotateX(-π/2))
+      const mainGeometry = new THREE.PlaneGeometry(
+        TILE_UNITS,
+        TILE_UNITS,
+        segN,
+        segN,
+      );
+      mainGeometry.rotateX(-Math.PI / 2);
+
+      const mainPos = mainGeometry.attributes['position'];
+      const mainUv = mainGeometry.attributes['uv'];
+      const mainVertCount = mainPos.count;
+
+      // Combined position/UV arrays: main plane vertices first, then bottom skirt vertices
+      const allPos: number[] = [];
+      const allUv: number[] = [];
+
+      // 1) Main plane vertices
+      for (let i = 0; i < mainVertCount; i++) {
+        allPos.push(mainPos.getX(i), mainPos.getY(i), mainPos.getZ(i));
+        allUv.push(mainUv.getX(i), mainUv.getY(i));
+      }
+
+      // 2) Bottom skirt vertices: one per perimeter vertex, directly below at y = -SKIRT_DEPTH
+      const bottomMap = new Map<number, number>(); // grid index -> bottom vertex offset
+      let bottomCounter = 0;
+
+      const isPerimeter = (r: number, c: number): boolean =>
+        r === 0 || r === segN || c === 0 || c === segN;
+
+      // First pass: assign bottom vertex offsets to perimeter positions
+      for (let r = 0; r <= segN; r++) {
+        for (let c = 0; c <= segN; c++) {
+          if (isPerimeter(r, c)) {
+            bottomMap.set(r * segPlusOne + c, bottomCounter);
+            bottomCounter++;
+          }
+        }
+      }
+
+      // Second pass: emit bottom vertex data
+      for (let r = 0; r <= segN; r++) {
+        for (let c = 0; c <= segN; c++) {
+          if (isPerimeter(r, c)) {
+            const gi = r * segPlusOne + c;
+            const x = mainPos.getX(gi);
+            const z = mainPos.getZ(gi);
+            const u = mainUv.getX(gi);
+            const v = mainUv.getY(gi);
+            allPos.push(x, -SKIRT_DEPTH, z);
+            allUv.push(u, v);
+          }
+        }
+      }
+
+      const bottomStart = mainVertCount;
+
+      // 3) Index buffer: main plane triangles + skirt wall quads
+      const idx: number[] = [];
+
+      // Main plane: two CCW triangles per cell
+      for (let row = 0; row < segN; row++) {
+        for (let col = 0; col < segN; col++) {
+          const v0 = row * segPlusOne + col;
+          const v1 = row * segPlusOne + col + 1;
+          const v2 = (row + 1) * segPlusOne + col;
+          const v3 = (row + 1) * segPlusOne + col + 1;
+          idx.push(v0, v1, v3);
+          idx.push(v0, v3, v2);
+        }
+      }
+
+      // Skirt walls: one quad (2 tris) per perimeter segment.
+      // Quad: top1 → top2 → bottom2 → bottom1 (vertical wall strip along the edge).
+      const addSkirtQuad = (top1: number, top2: number): void => {
+        const b1 = bottomStart + bottomMap.get(top1)!;
+        const b2 = bottomStart + bottomMap.get(top2)!;
+        idx.push(top1, b1, b2);
+        idx.push(top1, b2, top2);
+      };
+
+      // North edge (row = segN)
+      for (let col = 0; col < segN; col++) {
+        addSkirtQuad(segN * segPlusOne + col, segN * segPlusOne + col + 1);
+      }
+      // South edge (row = 0)
+      for (let col = 0; col < segN; col++) {
+        addSkirtQuad(col, col + 1);
+      }
+      // West edge (col = 0)
+      for (let row = 0; row < segN; row++) {
+        addSkirtQuad(row * segPlusOne, (row + 1) * segPlusOne);
+      }
+      // East edge (col = segN)
+      for (let row = 0; row < segN; row++) {
+        addSkirtQuad(row * segPlusOne + segN, (row + 1) * segPlusOne + segN);
+      }
+
+      // 4) Create combined BufferGeometry
+      const combinedGeometry = new THREE.BufferGeometry();
+      combinedGeometry.setAttribute(
+        'position',
+        new THREE.Float32BufferAttribute(allPos, 3),
+      );
+      combinedGeometry.setAttribute(
+        'uv',
+        new THREE.Float32BufferAttribute(allUv, 2),
+      );
+      combinedGeometry.setIndex(idx);
+      // Compute normals so lighting respects the displaced geometry (skirt walls included)
+      combinedGeometry.computeVertexNormals();
 
     const material = new THREE.MeshStandardMaterial({
       map: placeholderImagery,
       roughness: 1,
       metalness: 0,
-      side: THREE.DoubleSide, // displaced terrain can face either way at a valley
+      side: THREE.DoubleSide,
     });
 
     const uElevScale = { value: elevScale };
@@ -264,16 +374,9 @@ export function createTileTerrain(
     const uHeightMap = { value: placeholderHeight as THREE.Texture };
     patchMaterial(material, uElevScale, uTint, uHeightMap);
 
-    const mesh = new THREE.Mesh(geometry, material);
-    // Slight overlap hides hairline cracks between independently displaced
-    // tiles (edge height/normal sampling can differ at shared borders).
+    const mesh = new THREE.Mesh(combinedGeometry, material);
     mesh.scale.set(1.002, 1, 1.002);
     mesh.frustumCulled = false;
-    // The overlap makes adjacent tiles coincident at every seam. Elevation
-    // tiles quantize to integer metres, so matching boundary heights put two
-    // tiles exactly coplanar → z-fighting ("tears") down each seam. A tiny
-    // per-tile Y offset, flipped by (tileX+tileY) parity, means neighbours are
-    // never coplanar while the overlap still bridges the quantization step.
     mesh.position.y = 0;
     group.add(mesh);
 
