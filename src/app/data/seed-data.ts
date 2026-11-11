@@ -129,20 +129,20 @@ export const SEED_FLIGHTS: FlightSeed[] = [
  */
 export function photoForAircraft(aircraftType: string): string {
   const t = aircraftType.toLowerCase();
-  if (t.includes('a380')) return 'aircraft/UK-777.jpg';
-  if (t.includes('a350')) return 'aircraft/UK-777.jpg';
-  if (t.includes('a340')) return 'aircraft/UK-777.jpg';
-  if (t.includes('a330')) return 'aircraft/UK-777.jpg';
-  if (t.includes('a321')) return 'aircraft/UK-777.jpg';
-  if (t.includes('a320')) return 'aircraft/6E-201.jpg';
-  if (t.includes('a319')) return 'aircraft/6E-201.jpg';
-  if (t.includes('787')) return 'aircraft/AI-505.jpg';
-  if (t.includes('777')) return 'aircraft/AI-505.jpg';
-  if (t.includes('767')) return 'aircraft/AI-505.jpg';
-  if (t.includes('757')) return 'aircraft/AI-505.jpg';
-  if (t.includes('747')) return 'aircraft/AI-505.jpg';
-  if (t.includes('737')) return 'aircraft/AI-505.jpg';
-  return 'aircraft/UK-777.jpg';
+  if (t.includes('a380')) return 'https://t.plnspttrs.net/23391/2005400_8b85e75889_t.jpg';
+  if (t.includes('a350')) return 'https://t.plnspttrs.net/23391/2005400_8b85e75889_t.jpg';
+  if (t.includes('a340')) return 'https://t.plnspttrs.net/23391/2005400_8b85e75889_t.jpg';
+  if (t.includes('a330')) return 'https://t.plnspttrs.net/23391/2005400_8b85e75889_t.jpg';
+  if (t.includes('a321')) return 'https://t.plnspttrs.net/23391/2005400_8b85e75889_t.jpg';
+  if (t.includes('a320')) return 'https://t.plnspttrs.net/23391/2005400_8b85e75889_t.jpg';
+  if (t.includes('a319')) return 'https://t.plnspttrs.net/23391/2005400_8b85e75889_t.jpg';
+  if (t.includes('787')) return 'https://t.plnspttrs.net/44387/2005399_5e756921ac_t.jpg';
+  if (t.includes('777')) return 'https://t.plnspttrs.net/44387/2005399_5e756921ac_t.jpg';
+  if (t.includes('767')) return 'https://t.plnspttrs.net/44387/2005399_5e756921ac_t.jpg';
+  if (t.includes('757')) return 'https://t.plnspttrs.net/44387/2005399_5e756921ac_t.jpg';
+  if (t.includes('747')) return 'https://t.plnspttrs.net/44387/2005399_5e756921ac_t.jpg';
+  if (t.includes('737')) return 'https://t.plnspttrs.net/44387/2005399_5e756921ac_t.jpg';
+  return 'https://t.plnspttrs.net/33548/2005398_5a1f173f21_t.jpg';
 }
 
 export function cityForAirport(code: string): string {
