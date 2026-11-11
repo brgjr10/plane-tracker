@@ -29,28 +29,42 @@ import { createWingTrails, WingTrails } from './wing-trails';
 import { RadioService } from '../../services/radio.service';
 
 /**
- * Model asset (served from public/). Provide the .obj here; the matching .mtl is
- * loaded if present, otherwise a default material is applied. Adjust the names
- * to match the files you drop into public/models/.
+ * Model asset URL mapping: aircraft type keywords -> .obj filename (without extension).
+ * The matching .mtl file is loaded alongside if present; a default material is used
+ * when no matching .mtl exists.
  */
-const MODEL_OBJ_URL = 'models/aircraft.obj';
-const MODEL_MTL_URL = 'models/aircraft.mtl';
-/** Largest model dimension is scaled to this many world units. */
-const MODEL_TARGET_SIZE = 8;
-/** Degrees added to the heading if the model's nose isn't aligned to it. */
-const MODEL_YAW_OFFSET_DEG = 0;
+const MODEL_URL_MAP: Record<string, string> = {
+  'Airbus A380': '747-400',
+  'Airbus A350': '747-400',
+  'Airbus A340': '747-400',
+  'Airbus A330': 'aircraft',
+  'Airbus A321': 'aircraft',
+  'Airbus A320': 'aircraft',
+  'Airbus A319': 'aircraft',
+  'Boeing 777': 'aircraft',
+  'Boeing 787': 'aircraft',
+  'Boeing 767': 'aircraft',
+  'Boeing 757': 'aircraft',
+  'Boeing 747': '747-400',
+  'Boeing 737': 'aircraft',
+  'Boeing 727': 'aircraft',
+  'Boeing 717': 'aircraft',
+  'Default': 'aircraft',
+};
+
 /**
- * Up-axis correction, applied before centring/scaling. This OBJ is authored
- * Z-up (typical Blender/3ds Max export) while Three.js is Y-up, so without it
- * the fuselage stands vertical. Flip to +90 if a future model tips the other way.
+ * Derive the model .obj filename (without .obj/.mtl extension) from the given
+ * aircraft type string. Falls back to the generic ``aircraft`` model.
  */
-const MODEL_PITCH_OFFSET_DEG = -90;
-/**
- * Fixed yaw applied to the model (independent of the heading + chase) so its
- * nose lines up with the chase-behind direction. Negative = clockwise viewed
- * from above; flip the sign if it rotates the wrong way.
- */
-const MODEL_NOSE_YAW_DEG = -90;
+function resolveModelUrl(aircraftType: string): string {
+  const upper = aircraftType.toUpperCase();
+  for (const [key, value] of Object.entries(MODEL_URL_MAP)) {
+    if (upper.includes(key.toUpperCase())) {
+      return value;
+    }
+  }
+  return MODEL_URL_MAP['Default'];
+}
 
 /**
  * Cockpit (first-person) camera: eye position relative to the aircraft origin —
@@ -61,6 +75,12 @@ const MODEL_NOSE_YAW_DEG = -90;
 const COCKPIT_EYE_HEIGHT = 1.4;
 const COCKPIT_EYE_FORWARD = 2;
 const COCKPIT_LOOKAHEAD = 120;
+
+/** Model orientation/scale constants. */
+const MODEL_PITCH_OFFSET_DEG = -90;
+const MODEL_NOSE_YAW_DEG = 0;
+const MODEL_YAW_OFFSET_DEG = 180;
+const MODEL_TARGET_SIZE = 6;
 
 /** Third-person chase camera (behind + above the aircraft). */
 const CHASE_DISTANCE = 18;
@@ -167,6 +187,99 @@ export class FlightView3dComponent implements AfterViewInit, OnDestroy {
   readonly muted = signal(true);
   /** True while the first-person cockpit camera is active (bottom-centre toggle). */
   readonly cockpitView = signal(false);
+  /**
+   * The currently resolved model URL (filename without extension) for the live
+   * aircraft type. Changes when the live flight's aircraft type changes, which
+   * triggers a model reload via the `modelUrlEffect`.
+   */
+  readonly modelUrl = signal(resolveModelUrl('Default'));
+
+  /** Effect: re‑load the 3D model whenever the resolved URL changes. */
+  private readonly modelUrlEffect = effect(() => {
+    this.loadModel();
+  });
+
+  // Cockpit instrument computed signals.
+  readonly aiMaskTransform = computed(() => {
+    // Simulate pitch from altitude change rate (no live pitch field).
+    const vs = this.vsiValue();
+    const pitch = Math.max(-10, Math.min(10, vs / 1000));
+    const y = Math.max(-80, Math.min(80, pitch * 1.5));
+    return `translateY(${y}px)`;
+  });
+
+  readonly aiRollTransform = computed(() => {
+    const roll = this.bankAngle * (180 / Math.PI);
+    return `rotate(${roll}deg)`;
+  });
+
+  readonly altimeterNeedle = computed(() => {
+    const alt = this.flight()?.altitude ?? 0;
+    // 0-50000 ft maps to 0-360 deg
+    return (alt / 50000) * 360;
+  });
+
+  readonly altimeterTicks = computed(() => Array.from({ length: 11 }, (_, i) => ({
+    angle: i * 36,
+    label: i * 5000,
+  })));
+
+  readonly airspeedNeedle = computed(() => {
+    const spd = this.flight()?.speed ?? 0;
+    // 0-600 kts maps to 0-320 deg (aviation standard)
+    return Math.min(320, (spd / 600) * 320);
+  });
+
+  readonly airspeedTicks = computed(() => Array.from({ length: 13 }, (_, i) => ({
+    angle: i * 26.67,
+    label: i * 50,
+  })));
+
+  readonly headingNeedle = computed(() => {
+    const hdg = this.flight()?.heading ?? 0;
+    return hdg;
+  });
+
+  readonly headingTicks = computed(() => Array.from({ length: 36 }, (_, i) => ({
+    angle: i * 10,
+    label: i * 10,
+  })));
+
+  readonly vsiValue = computed(() => {
+    // Simulate vertical speed based on heading change and speed
+    const heading = this.flight()?.heading ?? 0;
+    const spd = this.flight()?.speed ?? 0;
+    return Math.round(Math.sin(heading * Math.PI / 180) * spd * 10);
+  });
+
+  readonly vsiNeedle = computed(() => {
+    const vs = this.vsiValue();
+    // -6000 to +6000 ft/min maps to -180 to +180 deg
+    return THREE.MathUtils.clamp(vs / 6000 * 180, -180, 180) + 180;
+  });
+
+  readonly vsiTicks = computed(() => Array.from({ length: 13 }, (_, i) => ({
+    angle: i * 30 - 180,
+    label: (i - 6) * 1000,
+  })));
+
+  readonly enginePct = computed(() => {
+    // Simulate engine power based on speed
+    const spd = this.flight()?.speed ?? 0;
+    return Math.round(THREE.MathUtils.clamp(spd / 500 * 100, 30, 100));
+  });
+
+  readonly engineNeedle = computed(() => {
+    const pct = this.enginePct();
+    // 0-100% maps to 60-300 deg
+    return 60 + (pct / 100) * 240;
+  });
+
+  readonly engineTicks = computed(() => Array.from({ length: 11 }, (_, i) => ({
+    angle: 60 + i * 24,
+    label: i * 10,
+  })));
+
   /**
    * Shared day/night theme, exposed for the toggle button. The header's toggle
    * is hidden behind this fullscreen view, so the 3D view has its own; both
@@ -362,6 +475,11 @@ export class FlightView3dComponent implements AfterViewInit, OnDestroy {
           fleet.find((p) => p.flightId.toUpperCase() === id) ??
           fleet.find((p) => (p as any).icao24?.toUpperCase?.() === id);
         if (plane) {
+          // Update the model URL when the aircraft type changes.
+          const resolved = resolveModelUrl(plane.aircraft);
+          if (this.modelUrl() !== resolved) {
+            this.modelUrl.set(resolved);
+          }
           if (this.model) {
             // Heading is compass degrees (CW from north); Three yaw is CCW.
             this.model.rotation.y = THREE.MathUtils.degToRad(
@@ -395,6 +513,9 @@ export class FlightView3dComponent implements AfterViewInit, OnDestroy {
   /** Load the OBJ (with its MTL if available), then centre + scale it. */
   private loadModel(): void {
     const objLoader = new OBJLoader();
+    const url = `models/${this.modelUrl()}`;
+    const mtlUrl = `${url}.mtl`;
+    const objUrl = `${url}.obj`;
 
     const place = (obj: THREE.Group): void => {
       // Correct the up-axis first so the bounding box below measures the model
@@ -445,16 +566,16 @@ export class FlightView3dComponent implements AfterViewInit, OnDestroy {
 
     // Try the .mtl first; if it isn't there, fall back to a default material.
     new MTLLoader().load(
-      MODEL_MTL_URL,
+      mtlUrl,
       (materials) => {
         materials.preload();
         objLoader.setMaterials(materials);
-        objLoader.load(MODEL_OBJ_URL, place, undefined, onError);
+        objLoader.load(objUrl, place, undefined, onError);
       },
       undefined,
       () => {
         objLoader.load(
-          MODEL_OBJ_URL,
+          objUrl,
           (obj) => {
             obj.traverse((child) => {
               const mesh = child as THREE.Mesh;

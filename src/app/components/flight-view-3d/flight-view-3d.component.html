@@ -168,6 +168,78 @@
   }
 </p>
 
+<!-- Cockpit instrument panel overlay — shown only in cockpit view. -->
+@if (cockpitView() && flight(); as f) {
+  <div class="cockpit-panel" role="region" aria-label="Cockpit instruments">
+    <!-- Attitude indicator (artificial horizon). -->
+    <div class="instrument ai">
+      <div class="ai__mask" [style.transform]="aiMaskTransform()"></div>
+      <div class="ai__horizon"></div>
+      <div class="ai__wings"></div>
+      <div class="ai__index"></div>
+      <div class="ai__nose"></div>
+      <div class="ai__airplane"></div>
+      <div class="ai__roll" [style.transform]="aiRollTransform()"></div>
+      <div class="ai__label ai--attitude">ATTITUDE</div>
+    </div>
+
+    <!-- Altimeter. -->
+    <div class="instrument altimeter">
+      <div class="instrument__face" style="--needle: {{ altimeterNeedle() }}deg;">
+        @for (t of altimeterTicks(); track t.angle) {
+          <div class="instrument__tick" [style.transform]="'rotate(' + t.angle + 'deg) translateY(-90px)'"></div>
+        }
+        <div class="instrument__needle"></div>
+        <div class="instrument__label">ALTITUDE<br/><span class="instrument__value">{{ f.altitude | number:'1.0-0' }}FT</span></div>
+      </div>
+    </div>
+
+    <!-- Airspeed indicator. -->
+    <div class="instrument airspeed">
+      <div class="instrument__face" style="--needle: {{ airspeedNeedle() }}deg;">
+        @for (t of airspeedTicks(); track t.angle) {
+          <div class="instrument__tick" [style.transform]="'rotate(' + t.angle + 'deg) translateY(-90px)'"></div>
+        }
+        <div class="instrument__needle"></div>
+        <div class="instrument__label">AIRSPEED<br/><span class="instrument__value">{{ f.speed | number:'1.0-0' }}KT</span></div>
+      </div>
+    </div>
+
+    <!-- Heading indicator. -->
+    <div class="instrument heading">
+      <div class="instrument__face" style="--needle: {{ headingNeedle() }}deg;">
+        @for (t of headingTicks(); track t.angle) {
+          <div class="instrument__tick" [style.transform]="'rotate(' + t.angle + 'deg) translateY(-90px)'"></div>
+        }
+        <div class="instrument__needle"></div>
+        <div class="instrument__label">HEADING<br/><span class="instrument__value">{{ f.heading | number:'1.0-0' }}°</span></div>
+      </div>
+    </div>
+
+    <!-- Vertical speed. -->
+    <div class="instrument vsi">
+      <div class="instrument__face" style="--needle: {{ vsiNeedle() }}deg;">
+        @for (t of vsiTicks(); track t.angle) {
+          <div class="instrument__tick" [style.transform]="'rotate(' + t.angle + 'deg) translateY(-90px)'"></div>
+        }
+        <div class="instrument__needle"></div>
+        <div class="instrument__label">V/S<br/><span class="instrument__value">{{ vsiValue() }}FT/MIN</span></div>
+      </div>
+    </div>
+
+    <!-- Engine / throttle gauge. -->
+    <div class="instrument engine">
+      <div class="instrument__face" style="--needle: {{ engineNeedle() }}deg;">
+        @for (t of engineTicks(); track t.angle) {
+          <div class="instrument__tick" [style.transform]="'rotate(' + t.angle + 'deg) translateY(-90px)'"></div>
+        }
+        <div class="instrument__needle"></div>
+        <div class="instrument__label">THROTTLE<br/><span class="instrument__value">{{ enginePct() }}%</span></div>
+      </div>
+    </div>
+  </div>
+}
+
 <p class="v3d__attribution">
   Imagery © Esri, Maxar, Earthstar Geographics · Elevation: AWS Terrain Tiles /
   Mapzen
