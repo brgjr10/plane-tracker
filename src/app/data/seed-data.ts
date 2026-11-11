@@ -129,22 +129,21 @@ export const SEED_FLIGHTS: FlightSeed[] = [
  */
 export function photoForAircraft(aircraftType: string): string {
   const t = aircraftType.toLowerCase();
-  // Use distinct Planespotters.net photos per aircraft type.
-  // Map major aircraft families to different photos for visual variety:
+  // Distinct Planespotters.net photos for each major aircraft family:
   if (t.includes('a380')) return 'https://t.plnspttrs.net/23391/2005400_8b85e75889_t.jpg';
   if (t.includes('a350')) return 'https://t.plnspttrs.net/44387/2005399_5e756921ac_t.jpg';
   if (t.includes('a340')) return 'https://t.plnspttrs.net/33548/2005398_5a1f173f21_t.jpg';
-  if (t.includes('a330')) return 'https://t.plnspttrs.net/23391/2005400_8b85e75889_t.jpg';
-  if (t.includes('a321')) return 'https://t.plnspttrs.net/44387/2005399_5e756921ac_t.jpg';
-  if (t.includes('a320')) return 'https://t.plnspttrs.net/33548/2005398_5a1f173f21_t.jpg';
-  if (t.includes('a319')) return 'https://t.plnspttrs.net/23391/2005400_8b85e75889_t.jpg';
-  if (t.includes('787')) return 'https://t.plnspttrs.net/33548/2005398_5a1f173f21_t.jpg';
-  if (t.includes('777')) return 'https://t.plnspttrs.net/44387/2005399_5e756921ac_t.jpg';
-  if (t.includes('767')) return 'https://t.plnspttrs.net/33548/2005398_5a1f173f21_t.jpg';
+  if (t.includes('a330')) return 'https://t.plnspttrs.net/48473/2005395_82153822e6_t.jpg';
+  if (t.includes('a321')) return 'https://t.plnspttrs.net/02833/2005394_11fbccfc23_t.jpg';
+  if (t.includes('a320')) return 'https://t.plnspttrs.net/19039/2005396_b34ebb64a4_t.jpg';
+  if (t.includes('a319')) return 'https://t.plnspttrs.net/37112/2005392_19274bcab0_t.jpg';
+  if (t.includes('787')) return 'https://t.plnspttrs.net/38993/2005393_ef2433e299_t.jpg';
+  if (t.includes('777')) return 'https://t.plnspttrs.net/46562/2005391_d62272430c_t.jpg';
+  if (t.includes('767')) return 'https://t.plnspttrs.net/47415/2005397_5edb434d7d_t.jpg';
   if (t.includes('757')) return 'https://t.plnspttrs.net/23391/2005400_8b85e75889_t.jpg';
   if (t.includes('747')) return 'https://t.plnspttrs.net/44387/2005399_5e756921ac_t.jpg';
   if (t.includes('737')) return 'https://t.plnspttrs.net/33548/2005398_5a1f173f21_t.jpg';
-  return 'https://t.plnspttrs.net/23391/2005400_8b85e75889_t.jpg';
+  return 'https://t.plnspttrs.net/48473/2005395_82153822e6_t.jpg';
 }
 
 export function cityForAirport(code: string): string {
