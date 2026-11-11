@@ -479,6 +479,8 @@ export class FlightView3dComponent implements AfterViewInit, OnDestroy {
     this.controls.addEventListener('start', () => (this.chaseEnabled = false));
 
     this.applyTheme(this.mapTheme.theme());
+    // Load the model now that the scene exists (the modelUrlEffect may have
+    // fired before ngAfterViewInit and bailed out due to no scene yet).
     this.loadModel();
 
     this.resizeObserver = new ResizeObserver(() => this.onResize());
@@ -532,6 +534,33 @@ export class FlightView3dComponent implements AfterViewInit, OnDestroy {
 
   /** Load the OBJ (with its MTL if available), then centre + scale it. */
   private loadModel(): void {
+    // Guard: the modelUrlEffect can fire before ngAfterViewInit sets up the
+    // scene; nothing to attach to yet, so bail out and let initScene handle it.
+    if (!this.scene) {
+      return;
+    }
+    // Remove any previous model before spawning a new one (aircraft-type change
+    // or initial duplicate-guard), so we never stack multiple models in the scene.
+    if (this.model) {
+      this.scene?.remove(this.model);
+      this.model.traverse((obj: THREE.Object3D) => {
+        const mesh = obj as THREE.Mesh;
+        if (mesh.isMesh) {
+          mesh.geometry?.dispose();
+          const material = mesh.material;
+          if (Array.isArray(material)) {
+            material.forEach((m) => m.dispose());
+          } else {
+            material?.dispose();
+          }
+        }
+      });
+      this.model = undefined;
+    }
+    this.bankGroup = undefined;
+    this.wingTrails?.dispose();
+    this.wingTrails = undefined;
+
     const objLoader = new OBJLoader();
     const url = `models/${this.modelUrl()}`;
     const mtlUrl = `${url}.mtl`;
