@@ -23,7 +23,7 @@ import {
   PanelAction,
 } from '../aircraft-info-panel/aircraft-info-panel.component';
 import { Aircraft } from '../../models/aircraft.model';
-import { AIRPORTS, cityForAirport, SEED_FLIGHTS } from '../../data/seed-data';
+import { AIRPORTS, cityForAirport, photoForAircraft } from '../../data/seed-data';
 import { LiveFlightService } from '../../services/live-flight.service';
 import { MapThemeService } from '../../services/map-theme.service';
 import {
@@ -659,9 +659,7 @@ export class MapComponent
    * city names are resolved from the airport codes the aircraft carries.
    */
   private cardInfoFor(plane: Aircraft): AircraftCardInfo {
-    const photoUrl =
-      SEED_FLIGHTS.find((seed) => seed.flightId === plane.flightId)?.photo ??
-      '';
+    const photoUrl = photoForAircraft(plane.aircraft);
     return {
       flightCode: plane.flightId,
       aircraftType: plane.aircraft,
@@ -676,14 +674,13 @@ export class MapComponent
    * (from the seed/airport reference) plus the live position values.
    */
   private panelInfoFor(plane: Aircraft): FlightPanelInfo {
-    const seed = SEED_FLIGHTS.find((s) => s.flightId === plane.flightId);
     const origin = AIRPORTS[plane.source];
     const destination = AIRPORTS[plane.destination];
     return {
       flightCode: plane.flightId,
       airline: plane.airline,
       aircraftType: plane.aircraft,
-      photoUrl: seed?.photo ?? '',
+      photoUrl: photoForAircraft(plane.aircraft),
       origin: {
         code: plane.source,
         city: cityForAirport(plane.source),
